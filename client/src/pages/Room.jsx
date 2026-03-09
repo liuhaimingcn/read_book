@@ -93,6 +93,41 @@ export default function Room() {
     return () => s.disconnect()
   }, [])
 
+  const checkSelection = useCallback(() => {
+    const sel = window.getSelection()
+    const text = sel?.toString()?.trim()
+    if (!contentRef.current) return
+    if (!text) {
+      setSelectionPopover(null)
+      return
+    }
+    try {
+      const range = sel.getRangeAt(0)
+      if (!contentRef.current.contains(range.commonAncestorContainer)) {
+        setSelectionPopover(null)
+        return
+      }
+      const pre = document.createRange()
+      pre.setStart(contentRef.current, 0)
+      pre.setEnd(range.startContainer, range.startOffset)
+      const start = pre.toString().length
+      const end = start + text.length
+      const rect = range.getBoundingClientRect()
+      const parentRect = contentRef.current.getBoundingClientRect()
+      setSelectionPopover({
+        start,
+        end,
+        text,
+        x: rect.left - parentRect.left + rect.width / 2,
+        y: rect.top - parentRect.top - 36,
+        rectTop: rect.top,
+        rectBottom: rect.bottom,
+      })
+    } catch {
+      setSelectionPopover(null)
+    }
+  }, [])
+
   useEffect(() => {
     if (!socket || !roomId) return
     socket.emit('join-room', roomId)
@@ -181,41 +216,6 @@ export default function Room() {
       navigate('/')
     }
   }
-
-  const checkSelection = useCallback(() => {
-    const sel = window.getSelection()
-    const text = sel?.toString()?.trim()
-    if (!contentRef.current) return
-    if (!text) {
-      setSelectionPopover(null)
-      return
-    }
-    try {
-      const range = sel.getRangeAt(0)
-      if (!contentRef.current.contains(range.commonAncestorContainer)) {
-        setSelectionPopover(null)
-        return
-      }
-      const pre = document.createRange()
-      pre.setStart(contentRef.current, 0)
-      pre.setEnd(range.startContainer, range.startOffset)
-      const start = pre.toString().length
-      const end = start + text.length
-      const rect = range.getBoundingClientRect()
-      const parentRect = contentRef.current.getBoundingClientRect()
-      setSelectionPopover({
-        start,
-        end,
-        text,
-        x: rect.left - parentRect.left + rect.width / 2,
-        y: rect.top - parentRect.top - 36,
-        rectTop: rect.top,
-        rectBottom: rect.bottom,
-      })
-    } catch {
-      setSelectionPopover(null)
-    }
-  }, [])
 
   const handleContentMouseUp = () => {
     checkSelection()
