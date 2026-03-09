@@ -20,7 +20,7 @@ const app = express();
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
-  cors: { origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] },
+  cors: { origin: ['http://localhost:3100', 'http://127.0.0.1:3100'] },
 });
 
 app.use(cors());
@@ -373,7 +373,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = 3000;
+const PORT = 3101;
 
 // 启动时加载持久化数据
 ensureDataDir();
