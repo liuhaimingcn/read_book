@@ -120,7 +120,7 @@ export default function Room() {
         end,
         text,
         x: rect.left - parentRect.left + rect.width / 2,
-        y: rect.top - parentRect.top - 36,
+        y: rect.top - parentRect.top - 56,
         rectTop: rect.top,
         rectBottom: rect.bottom,
       })
@@ -342,7 +342,7 @@ export default function Room() {
               /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
                 ? {
                     position: 'fixed',
-                    top: Math.max(60, selectionPopover.rectTop - 50),
+                    top: Math.max(60, selectionPopover.rectTop - 80),
                     left: '50%',
                     transform: 'translateX(-50%)',
                   }
