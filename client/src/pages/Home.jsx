@@ -134,6 +134,9 @@ export default function Home() {
       <header>
         <h1>📖 两人共读</h1>
         <p>上传书籍，创建房间，邀请好友一起阅读</p>
+        <button className="highlights-link" onClick={() => navigate('/highlights')}>
+          好词好句
+        </button>
         {backendOk === false && (
           <p className="backend-warn">⚠️ 后端未连接，请确保已运行 npm run dev（或分别启动 server 和 client）</p>
         )}

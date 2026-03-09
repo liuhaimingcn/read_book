@@ -15,6 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, 'data');
 const BOOKS_DIR = join(DATA_DIR, 'books');
 const ROOMS_FILE = join(DATA_DIR, 'rooms.json');
+const HIGHLIGHTS_FILE = join(DATA_DIR, 'highlights.json');
 
 const app = express();
 const httpServer = createServer(app);
@@ -55,6 +56,33 @@ function loadBooks() {
   }
 }
 
+// 迁移：将书籍内已有 highlights 同步到独立存储（仅补充缺失的）
+function migrateHighlightsFromBooks() {
+  const seen = new Set(highlightsStore.map((h) => `${h.bookId}:${h.pageIndex}:${h.start}:${h.end}:${h.type}`));
+  let added = 0;
+  for (const book of books.values()) {
+    for (const h of book.highlights || []) {
+      const key = `${book.id}:${h.pageIndex}:${h.start}:${h.end}:${h.type}`;
+      if (seen.has(key)) continue;
+      const text = book.pages?.[h.pageIndex]?.slice(h.start, h.end) || '';
+      highlightsStore.push({
+        id: uuidv4(),
+        bookId: book.id,
+        bookName: book.name,
+        pageIndex: h.pageIndex,
+        start: h.start,
+        end: h.end,
+        type: h.type,
+        text,
+        createdAt: Date.now(),
+      });
+      seen.add(key);
+      added++;
+    }
+  }
+  if (added > 0) saveHighlights();
+}
+
 function saveBook(book) {
   ensureDataDir();
   writeFileSync(join(BOOKS_DIR, `${book.id}.json`), JSON.stringify(book, null, 0), 'utf-8');
@@ -86,6 +114,22 @@ function saveRooms() {
     obj[id] = { id, bookId: room.bookId, currentPage: room.currentPage, createdAt: room.createdAt };
   }
   writeFileSync(ROOMS_FILE, JSON.stringify(obj, null, 0), 'utf-8');
+}
+
+// 好词好句独立存储（书删了也不删）
+let highlightsStore = [];
+function loadHighlights() {
+  if (!existsSync(HIGHLIGHTS_FILE)) return;
+  try {
+    const data = JSON.parse(readFileSync(HIGHLIGHTS_FILE, 'utf-8'));
+    highlightsStore = Array.isArray(data.items) ? data.items : [];
+  } catch (e) {
+    console.warn('[持久化] 加载好词好句失败:', e.message);
+  }
+}
+function saveHighlights() {
+  ensureDataDir();
+  writeFileSync(HIGHLIGHTS_FILE, JSON.stringify({ items: highlightsStore }, null, 0), 'utf-8');
 }
 
 // 分页逻辑：按段落分页，每页约500字
@@ -276,7 +320,7 @@ app.get('/api/rooms/:roomId/page', (req, res) => {
   });
 });
 
-// 添加划线（好词/好句）
+// 添加划线（好词/好句）- 同时写入书籍（阅读展示）和独立存储（书删了也不丢）
 app.post('/api/rooms/:roomId/highlights', (req, res) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return res.status(404).json({ error: '房间不存在' });
@@ -289,22 +333,48 @@ app.post('/api/rooms/:roomId/highlights', (req, res) => {
   if (pageIndex < 0 || pageIndex >= book.pages.length || start < 0 || end <= start) {
     return res.status(400).json({ error: '范围无效' });
   }
+  const text = book.pages[pageIndex]?.slice(start, end) || '';
   if (!book.highlights) book.highlights = [];
   book.highlights.push({ type, pageIndex, start, end });
   saveBook(book);
+  // 独立存储：书删了也不删
+  highlightsStore.push({
+    id: uuidv4(),
+    bookId: book.id,
+    bookName: book.name,
+    pageIndex,
+    start,
+    end,
+    type,
+    text,
+    createdAt: Date.now(),
+  });
+  saveHighlights();
   io.to(req.params.roomId).emit('highlights-updated', { pageIndex, highlights: book.highlights.filter((h) => h.pageIndex === pageIndex) });
   res.json({ ok: true, highlights: book.highlights.filter((h) => h.pageIndex === pageIndex) });
 });
 
-// 获取书中全部划线（按好词/好句分类）
+// 获取书中全部划线（从独立存储，按好词/好句分类）
 app.get('/api/rooms/:roomId/highlights-all', (req, res) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return res.status(404).json({ error: '房间不存在' });
   const book = books.get(room.bookId);
   if (!book) return res.status(404).json({ error: '书籍不存在' });
-  const highlights = book.highlights || [];
-  const words = highlights.filter((h) => h.type === 'word').map((h) => ({ ...h, text: book.pages[h.pageIndex]?.slice(h.start, h.end) || '' }));
-  const sentences = highlights.filter((h) => h.type === 'sentence').map((h) => ({ ...h, text: book.pages[h.pageIndex]?.slice(h.start, h.end) || '' }));
+  const byBook = highlightsStore.filter((h) => h.bookId === room.bookId);
+  const words = byBook.filter((h) => h.type === 'word').map((h) => ({ pageIndex: h.pageIndex, start: h.start, end: h.end, type: h.type, text: h.text }));
+  const sentences = byBook.filter((h) => h.type === 'sentence').map((h) => ({ pageIndex: h.pageIndex, start: h.start, end: h.end, type: h.type, text: h.text }));
+  res.json({ words, sentences });
+});
+
+// 获取全部好词好句（独立于书籍，书删了也能看到）
+app.get('/api/highlights', (req, res) => {
+  const bookIdToRoom = new Map();
+  for (const [roomId, room] of rooms) {
+    if (!bookIdToRoom.has(room.bookId)) bookIdToRoom.set(room.bookId, roomId);
+  }
+  const withRoom = (h) => ({ ...h, roomId: bookIdToRoom.get(h.bookId) || null });
+  const words = highlightsStore.filter((h) => h.type === 'word').map(withRoom);
+  const sentences = highlightsStore.filter((h) => h.type === 'sentence').map(withRoom);
   res.json({ words, sentences });
 });
 
@@ -378,6 +448,8 @@ const PORT = 3101;
 // 启动时加载持久化数据
 ensureDataDir();
 loadBooks();
+loadHighlights();
+migrateHighlightsFromBooks();
 loadRooms();
 
 // 启动前强制释放端口
