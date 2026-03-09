@@ -1,0 +1,61 @@
+:root {
+  font-family: 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  color: #1a1a1a;
+  background: #f5f0e8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid #c4b8a8;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+button:hover:not(:disabled) {
+  background: #e8e0d5;
+  border-color: #a89888;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+button.primary {
+  background: #5c4a3a;
+  color: #fff;
+  border-color: #5c4a3a;
+}
+button.primary:hover:not(:disabled) {
+  background: #4a3c2e;
+}
+
+input {
+  padding: 0.6em 1em;
+  border-radius: 8px;
+  border: 1px solid #c4b8a8;
+  font-size: 1em;
+  font-family: inherit;
+}
+
+.error {
+  color: #c44;
+  font-size: 0.9em;
+  margin-top: 0.5em;
+}
