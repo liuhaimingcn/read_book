@@ -75,6 +75,7 @@ function migrateHighlightsFromBooks() {
         type: h.type,
         text,
         createdAt: Date.now(),
+        used: false,
       });
       seen.add(key);
       added++;
@@ -122,7 +123,13 @@ function loadHighlights() {
   if (!existsSync(HIGHLIGHTS_FILE)) return;
   try {
     const data = JSON.parse(readFileSync(HIGHLIGHTS_FILE, 'utf-8'));
-    highlightsStore = Array.isArray(data.items) ? data.items : [];
+    let needsSave = false;
+    highlightsStore = (Array.isArray(data.items) ? data.items : []).map((h) => {
+      const id = h.id || uuidv4();
+      if (!h.id) needsSave = true;
+      return { ...h, id, used: !!h.used };
+    });
+    if (needsSave) saveHighlights();
   } catch (e) {
     console.warn('[持久化] 加载好词好句失败:', e.message);
   }
@@ -348,6 +355,7 @@ app.post('/api/rooms/:roomId/highlights', (req, res) => {
     type,
     text,
     createdAt: Date.now(),
+    used: false,
   });
   saveHighlights();
   io.to(req.params.roomId).emit('highlights-updated', { pageIndex, highlights: book.highlights.filter((h) => h.pageIndex === pageIndex) });
@@ -361,9 +369,19 @@ app.get('/api/rooms/:roomId/highlights-all', (req, res) => {
   const book = books.get(room.bookId);
   if (!book) return res.status(404).json({ error: '书籍不存在' });
   const byBook = highlightsStore.filter((h) => h.bookId === room.bookId);
-  const words = byBook.filter((h) => h.type === 'word').map((h) => ({ pageIndex: h.pageIndex, start: h.start, end: h.end, type: h.type, text: h.text }));
-  const sentences = byBook.filter((h) => h.type === 'sentence').map((h) => ({ pageIndex: h.pageIndex, start: h.start, end: h.end, type: h.type, text: h.text }));
+  const mapH = (h) => ({ ...h, used: !!h.used });
+  const words = byBook.filter((h) => h.type === 'word').map(mapH);
+  const sentences = byBook.filter((h) => h.type === 'sentence').map(mapH);
   res.json({ words, sentences });
+});
+
+// 标记好词好句为已使用/未使用
+app.patch('/api/highlights/:id/used', (req, res) => {
+  const item = highlightsStore.find((h) => h.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '不存在' });
+  item.used = !item.used;
+  saveHighlights();
+  res.json({ ok: true, used: item.used });
 });
 
 // 获取全部好词好句（独立于书籍，书删了也能看到）

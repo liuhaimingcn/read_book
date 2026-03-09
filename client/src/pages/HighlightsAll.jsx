@@ -4,6 +4,17 @@ import { safeJson } from '../utils/api'
 
 const PAGE_SIZE = 10
 
+function formatDate(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+async function toggleUsed(id) {
+  const res = await fetch(`/api/highlights/${id}/used`, { method: 'PATCH' })
+  return res.ok ? (await res.json()).used : null
+}
+
 export default function HighlightsAll() {
   const navigate = useNavigate()
   const [words, setWords] = useState([])
@@ -45,6 +56,14 @@ export default function HighlightsAll() {
     }
   }
 
+  const handleToggleUsed = async (id) => {
+    const used = await toggleUsed(id)
+    if (used !== null) {
+      setWords((prev) => prev.map((h) => (h.id === id ? { ...h, used } : h)))
+      setSentences((prev) => prev.map((h) => (h.id === id ? { ...h, used } : h)))
+    }
+  }
+
   if (loading) return <div className="highlights-page loading">加载中...</div>
   if (error) {
     return (
@@ -73,8 +92,17 @@ export default function HighlightsAll() {
           ) : (
             <>
               <ul className="highlights-list">
-                {wordsSlice.map((h, i) => (
-                  <li key={h.id || i}>
+                {wordsSlice.map((h) => (
+                  <li key={h.id || h.text}>
+                    <div className="highlight-meta">
+                      <span className="highlight-date">{formatDate(h.createdAt)}</span>
+                      <span className={`highlight-used ${h.used ? 'used' : ''}`}>{h.used ? '已使用' : '未使用'}</span>
+                      {h.id && (
+                        <button type="button" className="used-toggle" onClick={() => handleToggleUsed(h.id)}>
+                          {h.used ? '标为未使用' : '标为已使用'}
+                        </button>
+                      )}
+                    </div>
                     <span className="book-name">{h.bookName}</span>
                     <span className="text">{h.text}</span>
                     {h.roomId ? (
@@ -109,8 +137,17 @@ export default function HighlightsAll() {
           ) : (
             <>
               <ul className="highlights-list">
-                {sentencesSlice.map((h, i) => (
-                  <li key={h.id || i}>
+                {sentencesSlice.map((h) => (
+                  <li key={h.id || h.text}>
+                    <div className="highlight-meta">
+                      <span className="highlight-date">{formatDate(h.createdAt)}</span>
+                      <span className={`highlight-used ${h.used ? 'used' : ''}`}>{h.used ? '已使用' : '未使用'}</span>
+                      {h.id && (
+                        <button type="button" className="used-toggle" onClick={() => handleToggleUsed(h.id)}>
+                          {h.used ? '标为未使用' : '标为已使用'}
+                        </button>
+                      )}
+                    </div>
                     <span className="book-name">{h.bookName}</span>
                     <span className="text">{h.text}</span>
                     {h.roomId ? (
