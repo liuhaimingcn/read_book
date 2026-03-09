@@ -316,6 +316,7 @@ export default function Room() {
           tabIndex={/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 0 : undefined}
           onMouseUp={handleContentMouseUp}
           onTouchEnd={handleContentTouchEnd}
+          onContextMenu={(e) => e.preventDefault()}
         >
           {content ? (
             renderWithHighlights(content, highlights).map((p, i) =>
@@ -339,11 +340,16 @@ export default function Room() {
             className="highlight-popover"
             style={
               /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-                ? { position: 'fixed', top: '100px', left: '50%', transform: 'translateX(-50%)' }
+                ? {
+                    position: 'fixed',
+                    top: Math.max(60, selectionPopover.rectTop - 50),
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                  }
                 : {
                     position: 'absolute',
                     left: Math.max(0, selectionPopover.x - 60),
-                    top: 8,
+                    top: Math.max(0, selectionPopover.y),
                   }
             }
           >

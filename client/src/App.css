@@ -236,7 +236,7 @@
   font-family: 'Noto Serif SC', 'Songti SC', serif;
   user-select: text;
   -webkit-user-select: text;
-  -webkit-touch-callout: default;
+  -webkit-touch-callout: none; /* 不触发系统复制/分享菜单，用自定义划线弹框 */
   -webkit-tap-highlight-color: transparent;
 }
 .content-area .highlight-word {
