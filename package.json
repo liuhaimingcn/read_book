@@ -7,7 +7,8 @@
     "dev:client": "cd client && npm run dev",
     "start": "concurrently \"cd server && npm start\" \"cd client && npm run dev\"",
     "restart": "bash restart.sh",
-    "restart:daemon": "bash restart.sh -d"
+    "restart:daemon": "bash restart.sh -d",
+    "stop": "bash stop.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
