@@ -32,8 +32,8 @@ export default function Room() {
   const [content, setContent] = useState('')
   const [highlights, setHighlights] = useState([])
   const [selectionPopover, setSelectionPopover] = useState(null)
-  const [selectMode, setSelectMode] = useState(false)
   const contentRef = useRef(null)
+  const contentTextRef = useRef(null)
   const [currentPage, setCurrentPage] = useState(1)
   const currentPageRef = useRef(1)
   currentPageRef.current = currentPage
@@ -96,24 +96,25 @@ export default function Room() {
   const checkSelection = useCallback(() => {
     const sel = window.getSelection()
     const text = sel?.toString()?.trim()
-    if (!contentRef.current) return
+    const container = contentTextRef.current || contentRef.current
+    if (!container) return
     if (!text) {
       setSelectionPopover(null)
       return
     }
     try {
       const range = sel.getRangeAt(0)
-      if (!contentRef.current.contains(range.commonAncestorContainer)) {
+      if (!container.contains(range.commonAncestorContainer)) {
         setSelectionPopover(null)
         return
       }
       const pre = document.createRange()
-      pre.setStart(contentRef.current, 0)
+      pre.setStart(container, 0)
       pre.setEnd(range.startContainer, range.startOffset)
       const start = pre.toString().length
       const end = start + text.length
       const rect = range.getBoundingClientRect()
-      const parentRect = contentRef.current.getBoundingClientRect()
+      const parentRect = container.getBoundingClientRect()
       setSelectionPopover({
         start,
         end,
@@ -164,7 +165,7 @@ export default function Room() {
     const onSelectionChange = () => {
       clearTimeout(timer)
       timer = setTimeout(() => {
-        if (selectMode || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
           checkSelection()
         }
       }, 200)
@@ -174,7 +175,7 @@ export default function Room() {
       clearTimeout(timer)
       document.removeEventListener('selectionchange', onSelectionChange)
     }
-  }, [checkSelection, selectMode])
+  }, [checkSelection])
 
   useEffect(() => {
     const closePopover = (e) => {
@@ -304,19 +305,8 @@ export default function Room() {
       </header>
 
       <main className="content-area" ref={contentRef}>
-        {/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) && (
-          <button
-            type="button"
-            className="select-mode-btn"
-            onClick={() => {
-              setSelectMode(!selectMode)
-              if (!selectMode) contentRef.current?.focus()
-            }}
-          >
-            {selectMode ? '✓ 长按拖动选择' : '选择文字'}
-          </button>
-        )}
         <div
+          ref={contentTextRef}
           className="content"
           style={{ whiteSpace: 'pre-wrap' }}
           tabIndex={/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 0 : undefined}
