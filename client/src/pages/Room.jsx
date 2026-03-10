@@ -302,9 +302,10 @@ export default function Room() {
           <button
             className="copy-btn"
             onClick={() => {
-              navigator.clipboard.writeText(
-                `${window.location.origin}/room/${roomId}`
-              )
+              const host = window.location.host
+              const isLocal = /^localhost$|^127\.|^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(window.location.hostname)
+              const protocol = isLocal ? 'http:' : window.location.protocol
+              navigator.clipboard.writeText(`${protocol}//${host}/room/${roomId}`)
             }}
           >
             复制链接
