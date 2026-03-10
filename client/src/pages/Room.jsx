@@ -120,7 +120,7 @@ export default function Room() {
         end,
         text,
         x: rect.left - parentRect.left + rect.width / 2,
-        y: rect.top - parentRect.top - 56,
+        y: rect.top - parentRect.top - 36,
         rectTop: rect.top,
         rectBottom: rect.bottom,
       })
@@ -205,8 +205,10 @@ export default function Room() {
   }, [selectionPopover])
 
   useEffect(() => {
-    if (contentRef.current) contentRef.current.scrollTop = 0
-  }, [currentPage])
+    const el = contentRef.current
+    if (el) el.scrollTo(0, 0)
+    window.scrollTo(0, 0)
+  }, [currentPage, content])
 
   useEffect(() => {
     if (currentPage && totalPages) {
@@ -350,7 +352,7 @@ export default function Room() {
               /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
                 ? {
                     position: 'fixed',
-                    top: Math.max(60, selectionPopover.rectTop - 80),
+                    top: Math.max(60, selectionPopover.rectTop - 50),
                     left: '50%',
                     transform: 'translateX(-50%)',
                   }
