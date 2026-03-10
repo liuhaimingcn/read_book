@@ -409,21 +409,20 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: '房间已满，仅限两人' });
       return;
     }
-    socket.join(roomId, () => {
-      socket.roomId = roomId;
-      const roomSocketsNow = io.sockets.adapter.rooms.get(roomId);
-      const peerCount = roomSocketsNow ? roomSocketsNow.size : 0;
-      socket.emit('room-joined', {
-        currentPage: room.currentPage,
-        readerStates: room.readerStates,
-        peerCount,
-      });
-      io.to(roomId).emit('sync-state', {
-        currentPage: room.currentPage,
-        readerStates: room.readerStates,
-      });
-      io.to(roomId).emit('room-peer-update', { count: peerCount });
+    socket.join(roomId);
+    socket.roomId = roomId;
+    const roomSocketsNow = io.sockets.adapter.rooms.get(roomId);
+    const peerCount = roomSocketsNow ? roomSocketsNow.size : 0;
+    socket.emit('room-joined', {
+      currentPage: room.currentPage,
+      readerStates: room.readerStates,
+      peerCount,
     });
+    io.to(roomId).emit('sync-state', {
+      currentPage: room.currentPage,
+      readerStates: room.readerStates,
+    });
+    io.to(roomId).emit('room-peer-update', { count: peerCount });
   });
 
   // 语音通话：转发 WebRTC 信令（offer/answer/ICE）给房间内另一人
@@ -494,9 +493,9 @@ loadHighlights();
 migrateHighlightsFromBooks();
 loadRooms();
 
-// 启动前强制释放端口
+// 启动前强制释放端口（超时 2 秒，避免阻塞）
 try {
-  execSync(`lsof -ti:${PORT} | xargs kill -9 2>/dev/null`, { stdio: 'ignore' });
+  execSync(`lsof -ti:${PORT} | xargs kill -9 2>/dev/null`, { stdio: 'ignore', timeout: 2000 });
 } catch (_) {}
 
 httpServer.listen(PORT, () => {

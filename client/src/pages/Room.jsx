@@ -143,7 +143,14 @@ export default function Room() {
 
   useEffect(() => {
     if (!socket || !roomId) return
-    socket.emit('join-room', roomId)
+    const doJoin = () => {
+      socket.emit('join-room', roomId)
+    }
+    if (socket.connected) {
+      doJoin()
+    } else {
+      socket.once('connect', doJoin)
+    }
     socket.on('room-joined', (data) => {
       setCurrentPage(data.currentPage)
       setReaderStates(data.readerStates || {})
@@ -168,6 +175,7 @@ export default function Room() {
       if (data.pageIndex === currentPageRef.current - 1) setHighlights(data.highlights || [])
     })
     return () => {
+      socket.off('connect', doJoin)
       socket.off('room-joined')
       socket.off('room-peer-update')
       socket.off('sync-state')
