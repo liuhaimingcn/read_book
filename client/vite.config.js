@@ -1,21 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
-import basicSsl from '@vitejs/plugin-basic-ssl'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    react(),
-    basicSsl(), // 开发环境 HTTPS，自动生成自签名证书
-    nodePolyfills({ include: ['events', 'util', 'buffer', 'stream'] }),
-  ],
-  define: { global: 'globalThis' },
+  plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
   optimizeDeps: {
-    include: ['simple-peer', 'socket.io-client', 'react', 'react-dom'],
+    include: ['socket.io-client', 'react', 'react-dom'],
   },
   server: {
-    https: true,
     host: '0.0.0.0',
     port: 3100,
     warmup: {

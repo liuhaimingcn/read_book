@@ -4,7 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs';
 import iconv from 'iconv-lite';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
@@ -21,7 +21,7 @@ const app = express();
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
-  cors: { origin: ['http://localhost:3100', 'http://127.0.0.1:3100'] },
+  cors: { origin: ['http://localhost:3100', 'http://127.0.0.1:3100', 'http://localhost:3101', 'http://127.0.0.1:3101'] },
 });
 
 app.use(cors());
@@ -41,19 +41,41 @@ function ensureDataDir() {
   if (!existsSync(BOOKS_DIR)) mkdirSync(BOOKS_DIR, { recursive: true });
 }
 
+// 按页存储：只加载元数据，不加载正文
 function loadBooks() {
   if (!existsSync(BOOKS_DIR)) return;
   try {
     const files = readdirSync(BOOKS_DIR).filter((f) => f.endsWith('.json'));
     for (const f of files) {
-      const path = join(BOOKS_DIR, f);
-      const data = JSON.parse(readFileSync(path, 'utf-8'));
+      const filePath = join(BOOKS_DIR, f);
+      const data = JSON.parse(readFileSync(filePath, 'utf-8'));
       if (!data.highlights) data.highlights = [];
-      books.set(data.id, data);
+      // 旧格式（含 pages）：迁移到按页存储
+      if (data.pages && Array.isArray(data.pages)) {
+        const pagesDir = join(BOOKS_DIR, data.id, 'pages');
+        mkdirSync(pagesDir, { recursive: true });
+        for (let i = 0; i < data.pages.length; i++) {
+          writeFileSync(join(pagesDir, `${i}.txt`), data.pages[i] || '', 'utf-8');
+        }
+        const meta = { id: data.id, name: data.name, totalPages: data.totalPages, pageSize: data.pageSize || PAGE_SIZE, highlights: data.highlights || [] };
+        writeFileSync(filePath, JSON.stringify(meta, null, 0), 'utf-8');
+        books.set(data.id, meta);
+      } else {
+        books.set(data.id, data);
+      }
     }
   } catch (e) {
     console.warn('[持久化] 加载书籍失败:', e.message);
   }
+}
+
+// 按需读取单页内容
+function getPageContent(bookId, pageIndex) {
+  const pagePath = join(BOOKS_DIR, bookId, 'pages', `${pageIndex}.txt`);
+  if (existsSync(pagePath)) return readFileSync(pagePath, 'utf-8');
+  const book = books.get(bookId);
+  if (book?.pages?.[pageIndex]) return book.pages[pageIndex];
+  return '';
 }
 
 // 迁移：将书籍内已有 highlights 同步到独立存储（仅补充缺失的）
@@ -64,7 +86,8 @@ function migrateHighlightsFromBooks() {
     for (const h of book.highlights || []) {
       const key = `${book.id}:${h.pageIndex}:${h.start}:${h.end}:${h.type}`;
       if (seen.has(key)) continue;
-      const text = book.pages?.[h.pageIndex]?.slice(h.start, h.end) || '';
+      const pageContent = getPageContent(book.id, h.pageIndex);
+      const text = pageContent.slice(h.start, h.end) || '';
       highlightsStore.push({
         id: uuidv4(),
         bookId: book.id,
@@ -86,12 +109,22 @@ function migrateHighlightsFromBooks() {
 
 function saveBook(book) {
   ensureDataDir();
-  writeFileSync(join(BOOKS_DIR, `${book.id}.json`), JSON.stringify(book, null, 0), 'utf-8');
+  const meta = { id: book.id, name: book.name, totalPages: book.totalPages, pageSize: book.pageSize || PAGE_SIZE, highlights: book.highlights || [] };
+  writeFileSync(join(BOOKS_DIR, `${book.id}.json`), JSON.stringify(meta, null, 0), 'utf-8');
+  if (book.pages && Array.isArray(book.pages)) {
+    const pagesDir = join(BOOKS_DIR, book.id, 'pages');
+    mkdirSync(pagesDir, { recursive: true });
+    for (let i = 0; i < book.pages.length; i++) {
+      writeFileSync(join(pagesDir, `${i}.txt`), book.pages[i] || '', 'utf-8');
+    }
+  }
 }
 
 function removeBook(id) {
-  const path = join(BOOKS_DIR, `${id}.json`);
-  if (existsSync(path)) unlinkSync(path);
+  const metaPath = join(BOOKS_DIR, `${id}.json`);
+  const bookDir = join(BOOKS_DIR, id);
+  if (existsSync(metaPath)) unlinkSync(metaPath);
+  if (existsSync(bookDir)) rmSync(bookDir, { recursive: true });
 }
 
 function loadRooms() {
@@ -206,14 +239,13 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     const book = {
       id,
       name,
-      content,
       totalPages: pages.length,
       pageSize: PAGE_SIZE,
       pages,
       highlights: [],
     };
-    books.set(id, book);
     saveBook(book);
+    books.set(id, { id, name, totalPages: pages.length, pageSize: PAGE_SIZE, highlights: [] });
     res.json({ id, name, totalPages: pages.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -313,10 +345,10 @@ app.get('/api/rooms/:roomId/page', (req, res) => {
   const book = books.get(room.bookId);
   if (!book) return res.status(404).json({ error: '书籍不存在' });
   const pageParam = parseInt(req.query.page, 10);
-  const pageIndex = !isNaN(pageParam) && pageParam >= 1 && pageParam <= book.pages.length
+  const pageIndex = !isNaN(pageParam) && pageParam >= 1 && pageParam <= book.totalPages
     ? pageParam - 1
     : room.currentPage - 1;
-  const content = book.pages[pageIndex] || '';
+  const content = getPageContent(book.id, pageIndex);
   const highlights = (book.highlights || []).filter((h) => h.pageIndex === pageIndex);
   res.json({
     content,
@@ -337,10 +369,11 @@ app.post('/api/rooms/:roomId/highlights', (req, res) => {
   if (!['word', 'sentence'].includes(type) || typeof pageIndex !== 'number' || typeof start !== 'number' || typeof end !== 'number') {
     return res.status(400).json({ error: '参数错误' });
   }
-  if (pageIndex < 0 || pageIndex >= book.pages.length || start < 0 || end <= start) {
+  if (pageIndex < 0 || pageIndex >= book.totalPages || start < 0 || end <= start) {
     return res.status(400).json({ error: '范围无效' });
   }
-  const text = book.pages[pageIndex]?.slice(start, end) || '';
+  const pageContent = getPageContent(book.id, pageIndex);
+  const text = pageContent.slice(start, end) || '';
   if (!book.highlights) book.highlights = [];
   book.highlights.push({ type, pageIndex, start, end });
   saveBook(book);
@@ -411,34 +444,14 @@ io.on('connection', (socket) => {
     }
     socket.join(roomId);
     socket.roomId = roomId;
-    const roomSocketsNow = io.sockets.adapter.rooms.get(roomId);
-    const peerCount = roomSocketsNow ? roomSocketsNow.size : 0;
     socket.emit('room-joined', {
       currentPage: room.currentPage,
       readerStates: room.readerStates,
-      peerCount,
     });
     io.to(roomId).emit('sync-state', {
       currentPage: room.currentPage,
       readerStates: room.readerStates,
     });
-    io.to(roomId).emit('room-peer-update', { count: peerCount });
-  });
-
-  // 语音通话：转发 WebRTC 信令（offer/answer/ICE）给房间内另一人
-  socket.on('voice-signal', (payload) => {
-    const roomId = socket.roomId;
-    if (!roomId) return;
-    const room = rooms.get(roomId);
-    if (!room) return;
-    const roomSockets = io.sockets.adapter.rooms.get(roomId);
-    if (!roomSockets) return;
-    for (const sid of roomSockets) {
-      if (sid !== socket.id) {
-        io.to(sid).emit('voice-signal', { from: socket.id, ...payload });
-        break;
-      }
-    }
   });
 
   socket.on('reader-ready', () => {
@@ -477,12 +490,16 @@ io.on('connection', (socket) => {
           readerStates: room.readerStates,
         });
       }
-      const roomSockets = io.sockets.adapter.rooms.get(roomId);
-      const count = roomSockets ? roomSockets.size : 0;
-      io.to(roomId).emit('room-peer-update', { count });
     }
   });
 });
+
+// 生产环境：若存在 client/dist 则托管前端（放在所有 API 之后）
+const clientDist = join(__dirname, '..', 'client', 'dist');
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('*', (_, res) => res.sendFile(join(clientDist, 'index.html')));
+}
 
 const PORT = 3101;
 

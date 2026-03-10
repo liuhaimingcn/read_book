@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { safeJson } from '../utils/api'
-import { useVoiceCall } from '../hooks/useVoiceCall'
 
 function renderWithHighlights(content, highlights) {
   if (!content) return []
@@ -42,19 +41,8 @@ export default function Room() {
   const [readerStates, setReaderStates] = useState({})
   const [myReady, setMyReady] = useState(false)
   const [socket, setSocket] = useState(null)
-  const [peerCount, setPeerCount] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-
-  const {
-    status: voiceStatus,
-    errorMsg: voiceError,
-    muted,
-    startCall,
-    endCall,
-    toggleMute,
-    VOICE_STATUS,
-  } = useVoiceCall(socket, roomId, peerCount >= 2)
 
   const fetchPage = useCallback(async () => {
     try {
@@ -154,10 +142,6 @@ export default function Room() {
     socket.on('room-joined', (data) => {
       setCurrentPage(data.currentPage)
       setReaderStates(data.readerStates || {})
-      if (typeof data.peerCount === 'number') setPeerCount(data.peerCount)
-    })
-    socket.on('room-peer-update', (data) => {
-      if (typeof data.count === 'number') setPeerCount(data.count)
     })
     socket.on('sync-state', (data) => {
       setCurrentPage(data.currentPage)
@@ -177,7 +161,6 @@ export default function Room() {
     return () => {
       socket.off('connect', doJoin)
       socket.off('room-joined')
-      socket.off('room-peer-update')
       socket.off('sync-state')
       socket.off('page-turn')
       socket.off('error')
@@ -389,47 +372,6 @@ export default function Room() {
       </main>
 
       <footer className="room-footer">
-        {/* 语音通话 */}
-        <div className="voice-call">
-          {voiceError && <span className="voice-error">{voiceError}</span>}
-          {voiceStatus === VOICE_STATUS.idle && (
-            <>
-              <button
-                className="btn voice-btn"
-                onClick={startCall}
-                title={peerCount < 2 ? '等待对方加入房间' : '开始语音通话'}
-              >
-                🎤 开始语音
-              </button>
-              {peerCount < 2 && (
-                <span className="voice-hint">需 2 人在房间（当前 {peerCount}/2）</span>
-              )}
-            </>
-          )}
-          {(voiceStatus === VOICE_STATUS.requesting || voiceStatus === VOICE_STATUS.connecting) && (
-            <span className="voice-status">正在连接...</span>
-          )}
-          {voiceStatus === VOICE_STATUS.connected && (
-            <div className="voice-controls">
-              <button
-                className={`btn voice-btn ${muted ? 'muted' : ''}`}
-                onClick={toggleMute}
-                title={muted ? '取消静音' : '静音'}
-              >
-                {muted ? '🔇 已静音' : '🔊 静音'}
-              </button>
-              <button className="btn voice-btn end" onClick={endCall} title="结束通话">
-                📞 结束
-              </button>
-            </div>
-          )}
-          {voiceStatus === VOICE_STATUS.error && (
-            <button className="btn voice-btn" onClick={startCall}>
-              重试
-            </button>
-          )}
-        </div>
-
         {isLastPage ? (
           <p className="done">🎉 恭喜，你们已经读完这本书！</p>
         ) : (
