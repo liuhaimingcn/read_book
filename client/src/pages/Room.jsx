@@ -301,11 +301,16 @@ export default function Room() {
           <span>房间 ID: {roomId}</span>
           <button
             className="copy-btn"
-            onClick={() => {
-              const host = window.location.host
-              const isLocal = /^localhost$|^127\.|^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(window.location.hostname)
-              const protocol = isLocal ? 'http:' : window.location.protocol
-              navigator.clipboard.writeText(`${protocol}//${host}/room/${roomId}`)
+            onClick={async () => {
+              try {
+                const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
+                const res = await fetch(`/api/share-base?clientPort=${port}`)
+                const data = await safeJson(res)
+                const base = data?.url || window.location.origin
+                await navigator.clipboard.writeText(`${base.replace(/\/$/, '')}/room/${roomId}`)
+              } catch {
+                await navigator.clipboard.writeText(`${window.location.origin}/room/${roomId}`)
+              }
             }}
           >
             复制链接

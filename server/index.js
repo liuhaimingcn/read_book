@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs';
 import iconv from 'iconv-lite';
-import { tmpdir } from 'os';
+import { tmpdir, networkInterfaces } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -21,7 +21,7 @@ const app = express();
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
-  cors: { origin: ['http://localhost:3100', 'http://127.0.0.1:3100', 'http://localhost:3101', 'http://127.0.0.1:3101'] },
+  cors: { origin: true },
 });
 
 app.use(cors());
@@ -29,6 +29,25 @@ app.use(express.json());
 
 // 健康检查（用于确认后端已启动）
 app.get('/api/health', (_, res) => res.json({ ok: true }));
+
+// 分享链接基础 URL（用于复制链接，解决 localhost 时跨设备分享）
+app.get('/api/share-base', (req, res) => {
+  let host = req.get('x-forwarded-host') || req.get('host') || req.hostname;
+  const protocol = (req.get('x-forwarded-proto') || req.protocol || 'http').replace(/:$/, '') || 'http';
+  const clientPort = req.query.clientPort;
+  if ((!host || /^localhost$|^127\./.test(String(host).split(':')[0])) && clientPort) {
+    for (const nets of Object.values(networkInterfaces())) {
+      for (const net of nets || []) {
+        if (net.family === 'IPv4' && !net.internal && /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(net.address)) {
+          host = `${net.address}:${clientPort}`;
+          break;
+        }
+      }
+      if (host && String(host).includes('.')) break;
+    }
+  }
+  res.json({ url: `${protocol}://${host}` });
+});
 
 // 内存存储（启动时从磁盘加载）
 const books = new Map();
