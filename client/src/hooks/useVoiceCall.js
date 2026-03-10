@@ -43,6 +43,9 @@ export function useVoiceCall(socket, roomId, otherInRoom) {
     setErrorMsg('')
     setStatus(VOICE_STATUS.requesting)
     try {
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        throw new Error('UNSUPPORTED')
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       localStreamRef.current = stream
       setStatus(VOICE_STATUS.connecting)
@@ -77,9 +80,14 @@ export function useVoiceCall(socket, roomId, otherInRoom) {
 
       peerRef.current = peer
     } catch (err) {
-      const msg = err?.name === 'NotAllowedError' || /permission denied/i.test(err?.message || '')
-        ? '麦克风权限被拒绝，请在浏览器设置中允许访问麦克风后重试'
-        : (err?.message || '无法获取麦克风权限')
+      let msg = '无法获取麦克风权限'
+      if (err?.message === 'UNSUPPORTED') {
+        msg = '当前环境不支持语音通话，请使用 HTTPS 或 localhost 访问'
+      } else if (err?.name === 'NotAllowedError' || /permission denied/i.test(err?.message || '')) {
+        msg = '麦克风权限被拒绝，请在浏览器设置中允许访问麦克风后重试'
+      } else if (err?.message) {
+        msg = err.message
+      }
       setErrorMsg(msg)
       setStatus(VOICE_STATUS.error)
     }
@@ -109,6 +117,9 @@ export function useVoiceCall(socket, roomId, otherInRoom) {
       }
       setStatus(VOICE_STATUS.requesting)
       try {
+        if (!navigator?.mediaDevices?.getUserMedia) {
+          throw new Error('UNSUPPORTED')
+        }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         localStreamRef.current = stream
         setStatus(VOICE_STATUS.connecting)
@@ -144,9 +155,14 @@ export function useVoiceCall(socket, roomId, otherInRoom) {
         peer.signal(signal)
         peerRef.current = peer
       } catch (err) {
-        const msg = err?.name === 'NotAllowedError' || /permission denied/i.test(err?.message || '')
-          ? '麦克风权限被拒绝，请在浏览器设置中允许访问麦克风后重试'
-          : (err?.message || '无法获取麦克风权限')
+        let msg = '无法获取麦克风权限'
+        if (err?.message === 'UNSUPPORTED') {
+          msg = '当前环境不支持语音通话，请使用 HTTPS 或 localhost 访问'
+        } else if (err?.name === 'NotAllowedError' || /permission denied/i.test(err?.message || '')) {
+          msg = '麦克风权限被拒绝，请在浏览器设置中允许访问麦克风后重试'
+        } else if (err?.message) {
+          msg = err.message
+        }
         setErrorMsg(msg)
         setStatus(VOICE_STATUS.error)
       }
