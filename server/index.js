@@ -411,14 +411,34 @@ io.on('connection', (socket) => {
     }
     socket.join(roomId);
     socket.roomId = roomId;
+    const roomSockets = io.sockets.adapter.rooms.get(roomId);
+    const peerCount = roomSockets ? roomSockets.size : 0;
     socket.emit('room-joined', {
       currentPage: room.currentPage,
       readerStates: room.readerStates,
+      peerCount,
     });
     io.to(roomId).emit('sync-state', {
       currentPage: room.currentPage,
       readerStates: room.readerStates,
     });
+    io.to(roomId).emit('room-peer-update', { count: peerCount });
+  });
+
+  // 语音通话：转发 WebRTC 信令（offer/answer/ICE）给房间内另一人
+  socket.on('voice-signal', (payload) => {
+    const roomId = socket.roomId;
+    if (!roomId) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const roomSockets = io.sockets.adapter.rooms.get(roomId);
+    if (!roomSockets) return;
+    for (const sid of roomSockets) {
+      if (sid !== socket.id) {
+        io.to(sid).emit('voice-signal', { from: socket.id, ...payload });
+        break;
+      }
+    }
   });
 
   socket.on('reader-ready', () => {
@@ -457,6 +477,9 @@ io.on('connection', (socket) => {
           readerStates: room.readerStates,
         });
       }
+      const roomSockets = io.sockets.adapter.rooms.get(roomId);
+      const count = roomSockets ? roomSockets.size : 0;
+      io.to(roomId).emit('room-peer-update', { count });
     }
   });
 });

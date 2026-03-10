@@ -39,12 +39,14 @@ npm run dev
 4. 复制房间链接或房间 ID，分享给好友
 5. 好友通过链接或输入房间 ID 加入
 6. 两人都点击「读完了」后，自动翻到下一页
+7. 点击「开始语音」可实时语音通话（支持电脑和手机）
 
 ## 技术栈
 
 - 前端：React + Vite
 - 后端：Node.js + Express
 - 实时通信：Socket.io
+- 语音通话：WebRTC (simple-peer)
 
 ## 项目结构
 

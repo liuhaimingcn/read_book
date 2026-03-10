@@ -419,6 +419,61 @@
   align-items: center;
   gap: 1rem;
 }
+
+/* 语音通话 */
+.voice-call {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+.voice-call .voice-error {
+  font-size: 0.9em;
+  color: #c44;
+}
+.voice-call .voice-status {
+  font-size: 0.95em;
+  color: #6b5d52;
+}
+.voice-call .voice-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.voice-call .voice-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.95em;
+  background: #5c4a3a;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.voice-call .voice-btn:hover:not(:disabled) {
+  background: #3d3429;
+}
+.voice-call .voice-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.voice-call .voice-btn.muted {
+  background: #8a7d70;
+}
+.voice-call .voice-btn.end {
+  background: #c44;
+}
+.voice-call .voice-btn.end:hover {
+  background: #a33;
+}
+@media (max-width: 768px) {
+  .voice-call .voice-btn {
+    min-height: 44px;
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+  }
+}
 .room-footer .status {
   font-size: 0.95em;
   color: #6b5d52;
