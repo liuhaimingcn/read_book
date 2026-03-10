@@ -77,7 +77,10 @@ export function useVoiceCall(socket, roomId, otherInRoom) {
 
       peerRef.current = peer
     } catch (err) {
-      setErrorMsg(err.message || '无法获取麦克风权限')
+      const msg = err?.name === 'NotAllowedError' || /permission denied/i.test(err?.message || '')
+        ? '麦克风权限被拒绝，请在浏览器设置中允许访问麦克风后重试'
+        : (err?.message || '无法获取麦克风权限')
+      setErrorMsg(msg)
       setStatus(VOICE_STATUS.error)
     }
   }, [socket, roomId, otherInRoom, cleanup])
@@ -141,7 +144,10 @@ export function useVoiceCall(socket, roomId, otherInRoom) {
         peer.signal(signal)
         peerRef.current = peer
       } catch (err) {
-        setErrorMsg(err.message || '无法获取麦克风权限')
+        const msg = err?.name === 'NotAllowedError' || /permission denied/i.test(err?.message || '')
+          ? '麦克风权限被拒绝，请在浏览器设置中允许访问麦克风后重试'
+          : (err?.message || '无法获取麦克风权限')
+        setErrorMsg(msg)
         setStatus(VOICE_STATUS.error)
       }
     }

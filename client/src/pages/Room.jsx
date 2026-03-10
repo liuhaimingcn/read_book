@@ -385,14 +385,18 @@ export default function Room() {
         <div className="voice-call">
           {voiceError && <span className="voice-error">{voiceError}</span>}
           {voiceStatus === VOICE_STATUS.idle && (
-            <button
-              className="btn voice-btn"
-              onClick={startCall}
-              disabled={peerCount < 2}
-              title={peerCount < 2 ? '等待对方加入房间' : '开始语音通话'}
-            >
-              🎤 开始语音
-            </button>
+            <>
+              <button
+                className="btn voice-btn"
+                onClick={startCall}
+                title={peerCount < 2 ? '等待对方加入房间' : '开始语音通话'}
+              >
+                🎤 开始语音
+              </button>
+              {peerCount < 2 && (
+                <span className="voice-hint">需 2 人在房间（当前 {peerCount}/2）</span>
+              )}
+            </>
           )}
           {(voiceStatus === VOICE_STATUS.requesting || voiceStatus === VOICE_STATUS.connecting) && (
             <span className="voice-status">正在连接...</span>

@@ -432,6 +432,10 @@
   font-size: 0.9em;
   color: #c44;
 }
+.voice-call .voice-hint {
+  font-size: 0.85em;
+  color: #8a7d70;
+}
 .voice-call .voice-status {
   font-size: 0.95em;
   color: #6b5d52;
