@@ -498,7 +498,7 @@ io.on('connection', (socket) => {
 const clientDist = join(__dirname, '..', 'client', 'dist');
 if (existsSync(clientDist)) {
   app.use(express.static(clientDist));
-  app.get('*', (_, res) => res.sendFile(join(clientDist, 'index.html')));
+  app.get('/{*path}', (_, res) => res.sendFile(join(clientDist, 'index.html')));
 }
 
 const PORT = 3101;
