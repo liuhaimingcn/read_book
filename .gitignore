@@ -2,3 +2,6 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+# 运行时数据，不纳入版本控制
+server/data/
