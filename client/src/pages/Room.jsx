@@ -47,6 +47,7 @@ export default function Room() {
   const [totalPages, setTotalPages] = useState(0)
   const [readerStates, setReaderStates] = useState({})
   const [myReady, setMyReady] = useState(false)
+  const [readyCooldownRemaining, setReadyCooldownRemaining] = useState(0)
   const [socket, setSocket] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -163,6 +164,7 @@ export default function Room() {
       setCurrentPage(data.currentPage)
       setReaderStates(data.readerStates || {})
       setMyReady(false)
+      setReadyCooldownRemaining(5)
       await fetchPage()
     })
     socket.on('error', (data) => setError(data.message))
@@ -178,6 +180,14 @@ export default function Room() {
       socket.off('highlights-updated')
     }
   }, [socket, roomId, fetchPage])
+
+  useEffect(() => {
+    if (readyCooldownRemaining <= 0) return
+    const t = setInterval(() => {
+      setReadyCooldownRemaining((s) => (s <= 1 ? 0 : s - 1))
+    }, 1000)
+    return () => clearInterval(t)
+  }, [readyCooldownRemaining])
 
   useEffect(() => {
     let timer
@@ -285,7 +295,7 @@ export default function Room() {
   }
 
   const handleReady = () => {
-    if (!socket || myReady) return
+    if (!socket || myReady || readyCooldownRemaining > 0) return
     socket.emit('reader-ready')
     setMyReady(true)
   }
@@ -440,9 +450,9 @@ export default function Room() {
             <button
               className="btn ready-btn"
               onClick={handleReady}
-              disabled={myReady}
+              disabled={myReady || readyCooldownRemaining > 0}
             >
-              {myReady ? '已读完' : '读完了'}
+              {myReady ? '已读完' : readyCooldownRemaining > 0 ? `${readyCooldownRemaining}s 后可点击` : '读完了'}
             </button>
           </>
         )}
