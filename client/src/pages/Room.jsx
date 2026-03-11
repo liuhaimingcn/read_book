@@ -221,6 +221,12 @@ export default function Room() {
     window.scrollTo(0, 0)
   }, [currentPage, content, isPdf])
 
+  // 手机端 PDF 铺满：给 body 加类，供 CSS 移除 #root padding（兼容不支持 :has 的浏览器）
+  useEffect(() => {
+    if (isPdf) document.body.classList.add('room-pdf-view')
+    return () => document.body.classList.remove('room-pdf-view')
+  }, [isPdf])
+
   useEffect(() => {
     if (currentPage && totalPages) {
       fetch(`/api/rooms/${roomId}/page?page=${currentPage}`)
@@ -301,7 +307,7 @@ export default function Room() {
   }
 
   return (
-    <div className="room">
+    <div className={`room ${isPdf ? 'room--pdf' : ''}`}>
       <header className="room-header">
         <button className="back" onClick={() => navigate('/')}>
           ← 返回
