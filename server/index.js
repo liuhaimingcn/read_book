@@ -44,6 +44,26 @@ const io = new Server(httpServer, {
 app.use(cors());
 app.use(express.json({ limit: LIMITS.JSON_BODY_LIMIT }));
 
+// 请求日志：每次请求记录详情
+app.use((req, res, next) => {
+  const start = Date.now();
+  const ip = req.get('x-forwarded-for')?.split(',')[0]?.trim() || req.socket?.remoteAddress || '-';
+  const ua = req.get('user-agent') || '-';
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    const queryStr = Object.keys(req.query || {}).length ? `?${new URLSearchParams(req.query).toString()}` : '';
+    const log = [
+      `[请求] ${req.method} ${req.path}${queryStr}`,
+      `状态=${res.statusCode}`,
+      `耗时=${ms}ms`,
+      `IP=${ip}`,
+      `UA=${ua.slice(0, 80)}${ua.length > 80 ? '...' : ''}`,
+    ].join(' | ');
+    console.log(log);
+  });
+  next();
+});
+
 // 健康检查（用于确认后端已启动）
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
@@ -666,19 +686,25 @@ app.get('/api/highlights', (req, res) => {
 
 // Socket.io
 io.on('connection', (socket) => {
+  console.log(`[Socket] 连接 socket.id=${socket.id}`);
+
   socket.on('join-room', (roomId) => {
     const room = rooms.get(roomId);
     if (!room) {
+      console.log(`[Socket] join-room 失败 roomId=${roomId} 房间不存在`);
       socket.emit('error', { message: '房间不存在' });
       return;
     }
     const roomSockets = io.sockets.adapter.rooms.get(roomId);
     if (roomSockets && roomSockets.size >= 2) {
+      console.log(`[Socket] join-room 失败 roomId=${roomId} 房间已满`);
       socket.emit('error', { message: '房间已满，仅限两人' });
       return;
     }
     socket.join(roomId);
     socket.roomId = roomId;
+    const book = books.get(room.bookId);
+    console.log(`[Socket] join-room 成功 roomId=${roomId} 当前页=${room.currentPage}/${book?.totalPages || '?'} book=${book?.name || '?'}`);
     socket.emit('room-joined', {
       currentPage: room.currentPage,
       readerStates: room.readerStates,
@@ -699,14 +725,17 @@ io.on('connection', (socket) => {
     const readerCount = Object.keys(room.readerStates).length;
     const allReady = readerCount >= 2 && Object.values(room.readerStates).every(Boolean);
     if (allReady && room.currentPage < book.totalPages) {
+      const newPage = room.currentPage + 1;
       room.currentPage++;
       room.readerStates = {};
       saveRooms();
+      console.log(`[Socket] 翻页 roomId=${roomId} ${room.currentPage - 1} -> ${room.currentPage}/${book.totalPages} 书=${book?.name || '?'}`);
       io.to(roomId).emit('page-turn', {
         currentPage: room.currentPage,
         readerStates: {},
       });
     } else {
+      console.log(`[Socket] reader-ready roomId=${roomId} 已读=${readerCount}/2 当前页=${room.currentPage} 未翻页`);
       io.to(roomId).emit('sync-state', {
         currentPage: room.currentPage,
         readerStates: room.readerStates,
@@ -725,6 +754,7 @@ io.on('connection', (socket) => {
           readerStates: room.readerStates,
         });
       }
+      console.log(`[Socket] 断开 roomId=${roomId} socket.id=${socket.id}`);
     }
   });
 });

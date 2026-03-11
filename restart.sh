@@ -12,6 +12,30 @@ lsof -ti:$PORT_SERVER | xargs kill -9 2>/dev/null || true
 lsof -ti:$PORT_CLIENT | xargs kill -9 2>/dev/null || true
 sleep 1
 
+# 仅在 package.json/package-lock.json 有变动时执行 npm install
+do_install() {
+  local dir="$1"
+  (cd "$dir" 2>/dev/null) || return
+  if [ ! -d "$dir/node_modules" ]; then
+    echo "[依赖] $dir: node_modules 不存在，安装中..."
+    (cd "$dir" && npm install)
+    return
+  fi
+  local need=0
+  [ "$dir/package.json" -nt "$dir/node_modules" ] 2>/dev/null && need=1
+  [ -f "$dir/package-lock.json" ] && [ "$dir/package-lock.json" -nt "$dir/node_modules" ] 2>/dev/null && need=1
+  if [ "$need" = "1" ]; then
+    echo "[依赖] $dir: 检测到变动，安装中..."
+    (cd "$dir" && npm install)
+  else
+    echo "[依赖] $dir: 无变动，跳过"
+  fi
+}
+echo "[重启] 检查依赖..."
+do_install .
+do_install client
+do_install server
+
 echo "[重启] 启动服务..."
 if [ "$1" = "-d" ]; then
   nohup node server/index.js > server.log 2>&1 &
