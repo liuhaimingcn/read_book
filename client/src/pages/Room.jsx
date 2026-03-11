@@ -349,13 +349,13 @@ export default function Room() {
                 <img
                   src={pageImageUrl}
                   alt={`第 ${currentPage} 页`}
-                  style={{ maxWidth: '100%', width: 'auto', height: 'auto', display: 'block' }}
+                  style={{ display: 'block' }}
                 />
               ) : pdfUrl ? (
                 <Document file={pdfUrl} loading={<div className="pdf-loading">加载中...</div>}>
                   <Page
                     pageNumber={Math.max(1, Math.min(currentPage, totalPages))}
-                    width={Math.min(560, window.innerWidth - 48)}
+                    width={Math.min(720, Math.max(280, window.innerWidth - 32))}
                     renderTextLayer={false}
                   />
                 </Document>

@@ -15,21 +15,23 @@ sleep 1
 # 仅在 package.json/package-lock.json 有变动时执行 npm install
 do_install() {
   local dir="$1"
-  (cd "$dir" 2>/dev/null) || return
-  if [ ! -d "$dir/node_modules" ]; then
-    echo "[依赖] $dir: node_modules 不存在，安装中..."
-    (cd "$dir" && npm install)
-    return
-  fi
-  local need=0
-  [ "$dir/package.json" -nt "$dir/node_modules" ] 2>/dev/null && need=1
-  [ -f "$dir/package-lock.json" ] && [ "$dir/package-lock.json" -nt "$dir/node_modules" ] 2>/dev/null && need=1
-  if [ "$need" = "1" ]; then
-    echo "[依赖] $dir: 检测到变动，安装中..."
-    (cd "$dir" && npm install)
-  else
-    echo "[依赖] $dir: 无变动，跳过"
-  fi
+  (
+    cd "$dir" 2>/dev/null || { echo "[依赖] $dir: 目录不存在"; exit 1; }
+    if [ ! -d "node_modules" ]; then
+      echo "[依赖] $dir: node_modules 不存在，安装中..."
+      npm install
+      exit 0
+    fi
+    need=0
+    [ "package.json" -nt "node_modules" ] 2>/dev/null && need=1
+    [ -f "package-lock.json" ] && [ "package-lock.json" -nt "node_modules" ] 2>/dev/null && need=1
+    if [ "$need" = "1" ]; then
+      echo "[依赖] $dir: 检测到变动，安装中..."
+      npm install
+    else
+      echo "[依赖] $dir: 无变动，跳过"
+    fi
+  )
 }
 echo "[重启] 检查依赖..."
 do_install .
