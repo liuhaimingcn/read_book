@@ -4,7 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import iconv from 'iconv-lite';
 import { tmpdir, networkInterfaces } from 'os';
 import { join, dirname } from 'path';
@@ -14,6 +14,18 @@ import { execSync } from 'child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, 'data');
 const BOOKS_DIR = join(DATA_DIR, 'books');
+
+// 安全限制
+const LIMITS = {
+  FILE_SIZE: 5 * 1024 * 1024,      // 单文件最大 5MB
+  TOTAL_STORAGE: 100 * 1024 * 1024, // 总存储最大 100MB
+  MAX_BOOKS: 50,                    // 最多 50 本书
+  MAX_ROOMS: 100,                   // 最多 100 个房间
+  MAX_HIGHLIGHTS: 10000,             // 最多 10000 条好词好句
+  MAX_CONTENT_LENGTH: 2 * 1024 * 1024, // 文本内容最大 2MB（解码后）
+  MAX_FILENAME_LENGTH: 100,         // 文件名最长 100 字符
+  JSON_BODY_LIMIT: '100kb',         // JSON 请求体最大 100KB
+};
 const ROOMS_FILE = join(DATA_DIR, 'rooms.json');
 const HIGHLIGHTS_FILE = join(DATA_DIR, 'highlights.json');
 
@@ -25,7 +37,7 @@ const io = new Server(httpServer, {
 });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: LIMITS.JSON_BODY_LIMIT }));
 
 // 健康检查（用于确认后端已启动）
 app.get('/api/health', (_, res) => res.json({ ok: true }));
@@ -58,6 +70,32 @@ const PAGE_SIZE = 500; // 每页约500字，按段落分页
 function ensureDataDir() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
   if (!existsSync(BOOKS_DIR)) mkdirSync(BOOKS_DIR, { recursive: true });
+}
+
+// 获取 data 目录总大小（字节）
+function getTotalStorageSize() {
+  if (!existsSync(DATA_DIR)) return 0;
+  let total = 0;
+  try {
+    const walk = (dir) => {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else total += statSync(p).size;
+      }
+    };
+    walk(DATA_DIR);
+  } catch (_) {}
+  return total;
+}
+
+// 安全处理文件名：去除路径、控制字符、限制长度
+function sanitizeFilename(name) {
+  if (typeof name !== 'string') return '未命名.txt';
+  const base = name.replace(/[/\\:*?"<>|\x00-\x1f]/g, '').trim() || '未命名';
+  const safe = base.slice(0, LIMITS.MAX_FILENAME_LENGTH);
+  return safe.endsWith('.txt') ? safe : `${safe}.txt`;
 }
 
 // 按页存储：只加载元数据，不加载正文
@@ -223,11 +261,12 @@ function paginate(content, pageSize = PAGE_SIZE) {
   return pages.length ? pages : [''];
 }
 
-// 文件上传
+// 文件上传（限制单文件大小）
 const upload = multer({
   dest: tmpdir(),
+  limits: { fileSize: LIMITS.FILE_SIZE },
   fileFilter: (_, file, cb) => {
-    if (file.mimetype === 'text/plain' || (file.originalname || '').endsWith('.txt')) {
+    if (file.mimetype === 'text/plain' || (file.originalname || '').toLowerCase().endsWith('.txt')) {
       cb(null, true);
     } else {
       cb(new Error('只支持 txt 文件'));
@@ -243,16 +282,40 @@ function decodeText(buffer) {
   return str;
 }
 
-// 上传 txt 文件（优先使用客户端传来的 filename，避免中文乱码）
+// 上传 txt 文件（带安全校验）
 app.post('/api/upload', upload.single('file'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: '请选择文件' });
+
+    // 数量限制
+    if (books.size >= LIMITS.MAX_BOOKS) {
+      unlinkSync(req.file.path);
+      return res.status(400).json({ error: `最多只能上传 ${LIMITS.MAX_BOOKS} 本书` });
+    }
+
     const buffer = readFileSync(req.file.path);
     const content = decodeText(buffer);
     unlinkSync(req.file.path);
-    const name = (req.query?.filename && typeof req.query.filename === 'string')
-      ? decodeURIComponent(req.query.filename).trim()
-      : (req.file.originalname || '未命名.txt');
+
+    // 内容长度限制（防止超大文本耗尽内存）
+    if (content.length > LIMITS.MAX_CONTENT_LENGTH) {
+      return res.status(400).json({ error: `文件内容不能超过 ${LIMITS.MAX_CONTENT_LENGTH / 1024 / 1024}MB` });
+    }
+
+    let rawName = req.file.originalname || '未命名.txt';
+    try {
+      if (req.query?.filename && typeof req.query.filename === 'string') {
+        rawName = decodeURIComponent(req.query.filename);
+      }
+    } catch (_) {}
+    const name = sanitizeFilename(rawName);
+
+    // 存储空间限制（当前占用 + 新文件原始大小）
+    const currentSize = getTotalStorageSize();
+    if (currentSize + buffer.length > LIMITS.TOTAL_STORAGE) {
+      return res.status(400).json({ error: `存储空间已满（最多 ${LIMITS.TOTAL_STORAGE / 1024 / 1024}MB）` });
+    }
+
     const id = uuidv4();
     const pages = paginate(content);
     const book = {
@@ -267,7 +330,9 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     books.set(id, { id, name, totalPages: pages.length, pageSize: PAGE_SIZE, highlights: [] });
     res.json({ id, name, totalPages: pages.length });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    if (req.file?.path && existsSync(req.file.path)) unlinkSync(req.file.path);
+    const msg = e.code === 'LIMIT_FILE_SIZE' ? `单文件不能超过 ${LIMITS.FILE_SIZE / 1024 / 1024}MB` : e.message;
+    res.status(e.code === 'LIMIT_FILE_SIZE' ? 400 : 500).json({ error: msg });
   }
 });
 
@@ -319,6 +384,9 @@ app.post('/api/rooms', (req, res) => {
   const { bookId } = req.body;
   if (!bookId || !books.has(bookId)) {
     return res.status(400).json({ error: '书籍不存在' });
+  }
+  if (rooms.size >= LIMITS.MAX_ROOMS) {
+    return res.status(400).json({ error: `房间数量已达上限（${LIMITS.MAX_ROOMS}）` });
   }
   const roomId = uuidv4().slice(0, 8);
   const room = {
@@ -393,6 +461,9 @@ app.post('/api/rooms/:roomId/highlights', (req, res) => {
   }
   const pageContent = getPageContent(book.id, pageIndex);
   const text = pageContent.slice(start, end) || '';
+  if (highlightsStore.length >= LIMITS.MAX_HIGHLIGHTS) {
+    return res.status(400).json({ error: `好词好句数量已达上限（${LIMITS.MAX_HIGHLIGHTS}）` });
+  }
   if (!book.highlights) book.highlights = [];
   book.highlights.push({ type, pageIndex, start, end });
   saveBook(book);
@@ -511,6 +582,14 @@ io.on('connection', (socket) => {
       }
     }
   });
+});
+
+// 统一错误处理（如 multer 文件过大）
+app.use((err, req, res, next) => {
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ error: `单文件不能超过 ${LIMITS.FILE_SIZE / 1024 / 1024}MB` });
+  }
+  next(err);
 });
 
 // 生产环境：若存在 client/dist 则托管前端（放在所有 API 之后）
