@@ -13,6 +13,7 @@ import { execSync } from 'child_process';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
+const gm = require('gm');
 import { fromPath } from 'pdf2pic';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -321,6 +322,7 @@ function getGmPaths() {
 
 // PDF 预切割为图片页（需安装 graphicsmagick+ghostscript 或 imagemagick+ghostscript）
 async function convertPdfToPages(pdfPath, pagesDir) {
+  console.log('[PDF] 开始预切割:', pdfPath);
   const opts = {
     density: 150,
     format: 'png',
@@ -346,6 +348,7 @@ async function convertPdfToPages(pdfPath, pagesDir) {
     }
   }
   if (lastErr) throw lastErr;
+  console.log('[PDF] 转换完成，重命名文件...');
   const files = readdirSync(pagesDir).filter((f) => f.endsWith('.png')).sort((a, b) => {
     const na = parseInt(a.replace(/\D/g, ''), 10) || 0;
     const nb = parseInt(b.replace(/\D/g, ''), 10) || 0;
@@ -362,6 +365,22 @@ async function convertPdfToPages(pdfPath, pagesDir) {
       } catch (_) {}
     }
   }
+  // 裁剪每页白边（trim 移除四边与角点同色的区域）
+  console.log('[PDF] 开始裁剪白边，共', files.length, '页');
+  for (let i = 0; i < files.length; i++) {
+    const p = join(pagesDir, `${i}.png`);
+    try {
+      await new Promise((resolve, reject) => {
+        gm(p).trim().write(p, (err) => (err ? reject(err) : resolve()));
+      });
+      if ((i + 1) % 20 === 0 || i === files.length - 1) {
+        console.log('[PDF] trim 进度:', i + 1, '/', files.length);
+      }
+    } catch (e) {
+      console.warn('[PDF] trim 白边失败:', p, e.message);
+    }
+  }
+  console.log('[PDF] 预切割完成，共', files.length, '页');
   return files.length > 0;
 }
 
@@ -422,6 +441,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       mkdirSync(pagesDir, { recursive: true });
       let hasPages = false;
       try {
+        console.log('[PDF] 上传完成，开始预切割 bookId=', id, '页数=', numPages);
         hasPages = await convertPdfToPages(pdfPath, pagesDir);
       } catch (e) {
         console.warn('[PDF] 预切割失败，请安装: brew install graphicsmagick ghostscript 或 brew install imagemagick ghostscript');
