@@ -645,36 +645,48 @@ app.get('/api/rooms/:roomId/page', (req, res) => {
   res.json(base);
 });
 
-// 添加划线（好词/好句）- 仅 txt 支持，PDF 不支持
+// 添加划线（好词/好句）- txt 用 start/end，PDF 用 text
 app.post('/api/rooms/:roomId/highlights', (req, res) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return res.status(404).json({ error: '房间不存在' });
   const book = books.get(room.bookId);
   if (!book) return res.status(404).json({ error: '书籍不存在' });
-  if (book.bookType === 'pdf') return res.status(400).json({ error: 'PDF 暂不支持划线' });
-  const { type, pageIndex, start, end } = req.body || {};
-  if (!['word', 'sentence'].includes(type) || typeof pageIndex !== 'number' || typeof start !== 'number' || typeof end !== 'number') {
+  const { type, pageIndex, start, end, text: textBody } = req.body || {};
+  if (!['word', 'sentence'].includes(type) || typeof pageIndex !== 'number') {
     return res.status(400).json({ error: '参数错误' });
   }
-  if (pageIndex < 0 || pageIndex >= book.totalPages || start < 0 || end <= start) {
+  if (pageIndex < 0 || pageIndex >= book.totalPages) {
     return res.status(400).json({ error: '范围无效' });
   }
-  const pageContent = getPageContent(book.id, pageIndex);
-  const text = pageContent.slice(start, end) || '';
+  let text;
+  let startVal = 0;
+  let endVal = 0;
+  if (book.bookType === 'pdf') {
+    if (typeof textBody !== 'string' || !textBody.trim()) return res.status(400).json({ error: '请选择文字' });
+    text = textBody.trim().slice(0, 500);
+  } else {
+    if (typeof start !== 'number' || typeof end !== 'number') return res.status(400).json({ error: '参数错误' });
+    if (start < 0 || end <= start) return res.status(400).json({ error: '范围无效' });
+    const pageContent = getPageContent(book.id, pageIndex);
+    text = pageContent.slice(start, end) || '';
+    startVal = start;
+    endVal = end;
+  }
   if (highlightsStore.length >= LIMITS.MAX_HIGHLIGHTS) {
     return res.status(400).json({ error: `好词好句数量已达上限（${LIMITS.MAX_HIGHLIGHTS}）` });
   }
   if (!book.highlights) book.highlights = [];
-  book.highlights.push({ type, pageIndex, start, end });
+  const hl = book.bookType === 'pdf' ? { type, pageIndex, text } : { type, pageIndex, start: startVal, end: endVal };
+  book.highlights.push(hl);
   saveBook(book);
-  // 独立存储：书删了也不删
+  // 独立存储：书删了也不删（PDF 用 start=0, end=text.length 兼容）
   highlightsStore.push({
     id: uuidv4(),
     bookId: book.id,
     bookName: book.name,
     pageIndex,
-    start,
-    end,
+    start: startVal,
+    end: endVal,
     type,
     text,
     createdAt: Date.now(),

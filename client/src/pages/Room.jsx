@@ -38,9 +38,11 @@ export default function Room() {
   const [pdfUrl, setPdfUrl] = useState('')
   const [pdfPages, setPdfPages] = useState(false)
   const [pageImageUrl, setPageImageUrl] = useState('')
+  const [pdfHighlightMode, setPdfHighlightMode] = useState(false)
   const [selectionPopover, setSelectionPopover] = useState(null)
   const contentRef = useRef(null)
   const contentTextRef = useRef(null)
+  const pdfContentRef = useRef(null)
   const [currentPage, setCurrentPage] = useState(1)
   const currentPageRef = useRef(1)
   currentPageRef.current = currentPage
@@ -108,7 +110,7 @@ export default function Room() {
   const checkSelection = useCallback(() => {
     const sel = window.getSelection()
     const text = sel?.toString()?.trim()
-    const container = contentTextRef.current || contentRef.current
+    const container = isPdf && pdfHighlightMode ? pdfContentRef.current : (contentTextRef.current || contentRef.current)
     if (!container) return
     if (!text) {
       setSelectionPopover(null)
@@ -120,26 +122,30 @@ export default function Room() {
         setSelectionPopover(null)
         return
       }
-      const pre = document.createRange()
-      pre.setStart(container, 0)
-      pre.setEnd(range.startContainer, range.startOffset)
-      const start = pre.toString().length
-      const end = start + text.length
       const rect = range.getBoundingClientRect()
       const parentRect = container.getBoundingClientRect()
-      setSelectionPopover({
-        start,
-        end,
-        text,
-        x: rect.left - parentRect.left + rect.width / 2,
-        y: rect.top - parentRect.top - 36,
-        rectTop: rect.top,
-        rectBottom: rect.bottom,
-      })
+      if (isPdf && pdfHighlightMode) {
+        setSelectionPopover({ text, rectTop: rect.top, rectBottom: rect.bottom, x: rect.left - parentRect.left + rect.width / 2, y: rect.top - parentRect.top - 36 })
+      } else {
+        const pre = document.createRange()
+        pre.setStart(container, 0)
+        pre.setEnd(range.startContainer, range.startOffset)
+        const start = pre.toString().length
+        const end = start + text.length
+        setSelectionPopover({
+          start,
+          end,
+          text,
+          x: rect.left - parentRect.left + rect.width / 2,
+          y: rect.top - parentRect.top - 36,
+          rectTop: rect.top,
+          rectBottom: rect.bottom,
+        })
+      }
     } catch {
       setSelectionPopover(null)
     }
-  }, [])
+  }, [isPdf, pdfHighlightMode])
 
   useEffect(() => {
     if (!socket || !roomId) return
@@ -273,19 +279,15 @@ export default function Room() {
 
   const addHighlight = async (type) => {
     if (!selectionPopover) return
-    const { start, end } = selectionPopover
+    const { text, start, end } = selectionPopover
     setSelectionPopover(null)
     window.getSelection()?.removeAllRanges()
     try {
+      const body = isPdf ? { type, pageIndex: currentPage - 1, text } : { type, pageIndex: currentPage - 1, start, end }
       const res = await fetch(`/api/rooms/${roomId}/highlights`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          pageIndex: currentPage - 1,
-          start,
-          end,
-        }),
+        body: JSON.stringify(body),
       })
       if (res.ok) {
         const data = await safeJson(res)
@@ -349,9 +351,16 @@ export default function Room() {
           <button className="release-btn" onClick={releaseRoom} title="释放后房间将永久删除">
             释放房间
           </button>
-          {!isPdf && (
-            <button className="copy-btn" onClick={() => navigate(`/room/${roomId}/highlights`)}>
-              划线管理
+          <button className="copy-btn" onClick={() => navigate(`/room/${roomId}/highlights`)}>
+            划线管理
+          </button>
+          {isPdf && (
+            <button
+              className={`copy-btn ${pdfHighlightMode ? 'active' : ''}`}
+              onClick={() => setPdfHighlightMode((v) => !v)}
+              title={pdfHighlightMode ? '切换回图片模式' : '切换到可划线模式'}
+            >
+              {pdfHighlightMode ? '图片模式' : '可划线'}
             </button>
           )}
         </div>
@@ -359,9 +368,23 @@ export default function Room() {
 
       <main className="content-area" ref={contentRef}>
         {isPdf ? (
-          <div className="content pdf-viewer">
+          <div
+            className="content pdf-viewer"
+            ref={pdfHighlightMode ? pdfContentRef : undefined}
+            onMouseUp={pdfHighlightMode ? handleContentMouseUp : undefined}
+            onTouchEnd={pdfHighlightMode ? handleContentTouchEnd : undefined}
+            onContextMenu={pdfHighlightMode ? (e) => e.preventDefault() : undefined}
+          >
             {currentPage >= 1 && totalPages >= 1 ? (
-              pdfPages && pageImageUrl ? (
+              pdfHighlightMode && pdfUrl ? (
+                <Document file={pdfUrl} loading={<div className="pdf-loading">加载中...</div>}>
+                  <Page
+                    pageNumber={Math.max(1, Math.min(currentPage, totalPages))}
+                    width={Math.min(720, Math.max(280, window.innerWidth - 32))}
+                    renderTextLayer={true}
+                  />
+                </Document>
+              ) : pdfPages && pageImageUrl && !pdfHighlightMode ? (
                 <img
                   src={pageImageUrl}
                   alt={`第 ${currentPage} 页`}
@@ -410,7 +433,7 @@ export default function Room() {
             )}
           </div>
         )}
-        {!isPdf && selectionPopover && (
+        {selectionPopover && (
           <div
             className="highlight-popover"
             style={

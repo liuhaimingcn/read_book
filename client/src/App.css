@@ -201,6 +201,10 @@
   padding: 0.25rem 0.6em;
   font-size: 0.85em;
 }
+.room-header .copy-btn.active {
+  background: #e8e0d5;
+  border-color: #a89888;
+}
 .room-header .release-btn {
   color: #6b5d52;
 }
