@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { io } from 'socket.io-client'
+import { Document, Page, pdfjs } from 'react-pdf'
 import { safeJson } from '../utils/api'
+
+pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
 
 function renderWithHighlights(content, highlights) {
   if (!content) return []
@@ -31,6 +34,10 @@ export default function Room() {
   const [book, setBook] = useState(null)
   const [content, setContent] = useState('')
   const [highlights, setHighlights] = useState([])
+  const [isPdf, setIsPdf] = useState(false)
+  const [pdfUrl, setPdfUrl] = useState('')
+  const [pdfPages, setPdfPages] = useState(false)
+  const [pageImageUrl, setPageImageUrl] = useState('')
   const [selectionPopover, setSelectionPopover] = useState(null)
   const contentRef = useRef(null)
   const contentTextRef = useRef(null)
@@ -49,11 +56,15 @@ export default function Room() {
       const res = await fetch(`/api/rooms/${roomId}/page`)
       if (!res.ok) throw new Error('获取失败')
       const data = await safeJson(res)
-      setContent(data.content)
+      setContent(data.content || '')
       setHighlights(data.highlights || [])
       setCurrentPage(data.currentPage)
       setTotalPages(data.totalPages)
       setReaderStates(data.readerStates || {})
+      setIsPdf(data.type === 'pdf')
+      setPdfUrl(data.pdfUrl ? `${window.location.origin}${data.pdfUrl}` : '')
+      setPdfPages(!!data.pdfPages)
+      setPageImageUrl(data.pageImageUrl ? `${window.location.origin}${data.pageImageUrl}` : '')
     } catch (err) {
       setError(err.message)
     }
@@ -208,7 +219,7 @@ export default function Room() {
     const el = contentRef.current
     if (el) el.scrollTo(0, 0)
     window.scrollTo(0, 0)
-  }, [currentPage, content])
+  }, [currentPage, content, isPdf])
 
   useEffect(() => {
     if (currentPage && totalPages) {
@@ -217,6 +228,10 @@ export default function Room() {
         .then((d) => {
           setContent(d?.content ?? '')
           setHighlights(d?.highlights ?? [])
+          setIsPdf(d?.type === 'pdf')
+          setPdfUrl(d?.pdfUrl ? `${window.location.origin}${d.pdfUrl}` : '')
+          setPdfPages(!!d?.pdfPages)
+          setPageImageUrl(d?.pageImageUrl ? `${window.location.origin}${d.pageImageUrl}` : '')
         })
         .catch(() => {})
     }
@@ -318,40 +333,68 @@ export default function Room() {
           <button className="release-btn" onClick={releaseRoom} title="释放后房间将永久删除">
             释放房间
           </button>
-          <button className="copy-btn" onClick={() => navigate(`/room/${roomId}/highlights`)}>
-            划线管理
-          </button>
+          {!isPdf && (
+            <button className="copy-btn" onClick={() => navigate(`/room/${roomId}/highlights`)}>
+              划线管理
+            </button>
+          )}
         </div>
       </header>
 
       <main className="content-area" ref={contentRef}>
-        <div
-          ref={contentTextRef}
-          className="content"
-          style={{ whiteSpace: 'pre-wrap' }}
-          tabIndex={/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 0 : undefined}
-          onMouseUp={handleContentMouseUp}
-          onTouchEnd={handleContentTouchEnd}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          {content ? (
-            renderWithHighlights(content, highlights).map((p, i) =>
-              p.type === 'text' ? (
-                <span key={i}>{p.text}</span>
+        {isPdf ? (
+          <div className="content pdf-viewer">
+            {currentPage >= 1 && totalPages >= 1 ? (
+              pdfPages && pageImageUrl ? (
+                <img
+                  src={pageImageUrl}
+                  alt={`第 ${currentPage} 页`}
+                  style={{ maxWidth: '100%', width: 'auto', height: 'auto', display: 'block' }}
+                />
+              ) : pdfUrl ? (
+                <Document file={pdfUrl} loading={<div className="pdf-loading">加载中...</div>}>
+                  <Page
+                    pageNumber={Math.max(1, Math.min(currentPage, totalPages))}
+                    width={Math.min(560, window.innerWidth - 48)}
+                    renderTextLayer={false}
+                  />
+                </Document>
               ) : (
-                <mark
-                  key={i}
-                  className={p.type === 'word' ? 'highlight-word' : 'highlight-sentence'}
-                >
-                  {p.text}
-                </mark>
+                <div className="pdf-loading">加载中...</div>
               )
-            )
-          ) : (
-            '（本页无内容）'
-          )}
-        </div>
-        {selectionPopover && (
+            ) : (
+              <div className="pdf-loading">加载中...</div>
+            )}
+          </div>
+        ) : (
+          <div
+            ref={contentTextRef}
+            className="content"
+            style={{ whiteSpace: 'pre-wrap' }}
+            tabIndex={/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 0 : undefined}
+            onMouseUp={handleContentMouseUp}
+            onTouchEnd={handleContentTouchEnd}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {content ? (
+              renderWithHighlights(content, highlights).map((p, i) =>
+                p.type === 'text' ? (
+                  <span key={i}>{p.text}</span>
+                ) : (
+                  <mark
+                    key={i}
+                    className={p.type === 'word' ? 'highlight-word' : 'highlight-sentence'}
+                  >
+                    {p.text}
+                  </mark>
+                )
+              )
+            ) : (
+              '（本页无内容）'
+            )}
+          </div>
+        )}
+        {!isPdf && selectionPopover && (
           <div
             className="highlight-popover"
             style={

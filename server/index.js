@@ -10,6 +10,10 @@ import { tmpdir, networkInterfaces } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+import { fromPath } from 'pdf2pic';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, 'data');
@@ -17,7 +21,8 @@ const BOOKS_DIR = join(DATA_DIR, 'books');
 
 // 安全限制
 const LIMITS = {
-  FILE_SIZE: 5 * 1024 * 1024,      // 单文件最大 5MB
+  FILE_SIZE_TXT: 5 * 1024 * 1024,   // txt 单文件最大 5MB
+  FILE_SIZE_PDF: 50 * 1024 * 1024,  // pdf 单文件最大 50MB
   TOTAL_STORAGE: 100 * 1024 * 1024, // 总存储最大 100MB
   MAX_BOOKS: 50,                    // 最多 50 本书
   MAX_ROOMS: 100,                   // 最多 100 个房间
@@ -91,11 +96,13 @@ function getTotalStorageSize() {
 }
 
 // 安全处理文件名：去除路径、控制字符、限制长度
-function sanitizeFilename(name) {
-  if (typeof name !== 'string') return '未命名.txt';
+function sanitizeFilename(name, ext = '.txt') {
+  if (typeof name !== 'string') return `未命名${ext}`;
   const base = name.replace(/[/\\:*?"<>|\x00-\x1f]/g, '').trim() || '未命名';
   const safe = base.slice(0, LIMITS.MAX_FILENAME_LENGTH);
-  return safe.endsWith('.txt') ? safe : `${safe}.txt`;
+  if (safe.toLowerCase().endsWith('.pdf')) return safe;
+  if (safe.toLowerCase().endsWith('.txt')) return safe;
+  return safe.includes('.') ? safe : `${safe}${ext}`;
 }
 
 // 按页存储：只加载元数据，不加载正文
@@ -114,10 +121,15 @@ function loadBooks() {
         for (let i = 0; i < data.pages.length; i++) {
           writeFileSync(join(pagesDir, `${i}.txt`), data.pages[i] || '', 'utf-8');
         }
-        const meta = { id: data.id, name: data.name, totalPages: data.totalPages, pageSize: data.pageSize || PAGE_SIZE, highlights: data.highlights || [] };
+        const meta = { id: data.id, name: data.name, totalPages: data.totalPages, pageSize: data.pageSize || PAGE_SIZE, highlights: data.highlights || [], bookType: 'txt' };
         writeFileSync(filePath, JSON.stringify(meta, null, 0), 'utf-8');
         books.set(data.id, meta);
       } else {
+        if (!data.bookType) data.bookType = 'txt';
+        if (data.bookType === 'pdf' && data.pdfPages === undefined) {
+          const pagesDir = join(BOOKS_DIR, data.id, 'pages');
+          data.pdfPages = existsSync(pagesDir) && readdirSync(pagesDir).some((f) => f.endsWith('.png'));
+        }
         books.set(data.id, data);
       }
     }
@@ -126,11 +138,12 @@ function loadBooks() {
   }
 }
 
-// 按需读取单页内容
+// 按需读取单页内容（仅 txt）
 function getPageContent(bookId, pageIndex) {
+  const book = books.get(bookId);
+  if (book?.bookType === 'pdf') return '';
   const pagePath = join(BOOKS_DIR, bookId, 'pages', `${pageIndex}.txt`);
   if (existsSync(pagePath)) return readFileSync(pagePath, 'utf-8');
-  const book = books.get(bookId);
   if (book?.pages?.[pageIndex]) return book.pages[pageIndex];
   return '';
 }
@@ -166,7 +179,14 @@ function migrateHighlightsFromBooks() {
 
 function saveBook(book) {
   ensureDataDir();
-  const meta = { id: book.id, name: book.name, totalPages: book.totalPages, pageSize: book.pageSize || PAGE_SIZE, highlights: book.highlights || [] };
+  const meta = {
+    id: book.id,
+    name: book.name,
+    totalPages: book.totalPages,
+    pageSize: book.pageSize || PAGE_SIZE,
+    highlights: book.highlights || [],
+    bookType: book.bookType || 'txt',
+  };
   writeFileSync(join(BOOKS_DIR, `${book.id}.json`), JSON.stringify(meta, null, 0), 'utf-8');
   if (book.pages && Array.isArray(book.pages)) {
     const pagesDir = join(BOOKS_DIR, book.id, 'pages');
@@ -261,18 +281,69 @@ function paginate(content, pageSize = PAGE_SIZE) {
   return pages.length ? pages : [''];
 }
 
-// 文件上传（限制单文件大小）
+// 文件上传（PDF 50MB，txt 5MB，multer 用较大值）
 const upload = multer({
   dest: tmpdir(),
-  limits: { fileSize: LIMITS.FILE_SIZE },
+  limits: { fileSize: LIMITS.FILE_SIZE_PDF },
   fileFilter: (_, file, cb) => {
-    if (file.mimetype === 'text/plain' || (file.originalname || '').toLowerCase().endsWith('.txt')) {
-      cb(null, true);
-    } else {
-      cb(new Error('只支持 txt 文件'));
-    }
+    const name = (file.originalname || '').toLowerCase();
+    const ok = file.mimetype === 'text/plain' || file.mimetype === 'application/pdf' ||
+      name.endsWith('.txt') || name.endsWith('.pdf');
+    cb(ok ? null : new Error('只支持 txt、pdf 文件'), ok);
   },
 });
+
+// 常见 gm 路径（macOS Homebrew），仅存在时尝试
+function getGmPaths() {
+  const candidates = ['/opt/homebrew/bin/', '/usr/local/bin/'];
+  return candidates.filter((p) => existsSync(join(p, 'gm')));
+}
+
+// PDF 预切割为图片页（需安装 graphicsmagick+ghostscript 或 imagemagick+ghostscript）
+async function convertPdfToPages(pdfPath, pagesDir) {
+  const opts = {
+    density: 150,
+    format: 'png',
+    width: 1200,
+    preserveAspectRatio: true,
+    savePath: pagesDir,
+    saveFilename: 'page',
+  };
+  const tries = [
+    ...getGmPaths().map((p) => () => { const c = fromPath(pdfPath, opts); c.setGMClass(p); return c; }),
+    () => { const c = fromPath(pdfPath, opts); c.setGMClass(true); return c; },
+    () => fromPath(pdfPath, opts),
+  ];
+  let lastErr;
+  for (const fn of tries) {
+    try {
+      const convert = fn();
+      await convert.bulk(-1, { responseType: 'image' });
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (lastErr) throw lastErr;
+  const files = readdirSync(pagesDir).filter((f) => f.endsWith('.png')).sort((a, b) => {
+    const na = parseInt(a.replace(/\D/g, ''), 10) || 0;
+    const nb = parseInt(b.replace(/\D/g, ''), 10) || 0;
+    return na - nb;
+  });
+  for (let i = 0; i < files.length; i++) {
+    const src = join(pagesDir, files[i]);
+    const dest = join(pagesDir, `${i}.png`);
+    if (src !== dest) {
+      try {
+        const buf = readFileSync(src);
+        writeFileSync(dest, buf);
+        unlinkSync(src);
+      } catch (_) {}
+    }
+  }
+  return files.length > 0;
+}
 
 // 解码文本内容（支持 UTF-8、GBK）
 function decodeText(buffer) {
@@ -282,8 +353,8 @@ function decodeText(buffer) {
   return str;
 }
 
-// 上传 txt 文件（带安全校验）
-app.post('/api/upload', upload.single('file'), (req, res) => {
+// 上传 txt/pdf 文件（带安全校验）
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: '请选择文件' });
 
@@ -294,23 +365,64 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     }
 
     const buffer = readFileSync(req.file.path);
-    const content = decodeText(buffer);
-    unlinkSync(req.file.path);
-
-    // 内容长度限制（防止超大文本耗尽内存）
-    if (content.length > LIMITS.MAX_CONTENT_LENGTH) {
-      return res.status(400).json({ error: `文件内容不能超过 ${LIMITS.MAX_CONTENT_LENGTH / 1024 / 1024}MB` });
-    }
-
     let rawName = req.file.originalname || '未命名.txt';
     try {
       if (req.query?.filename && typeof req.query.filename === 'string') {
         rawName = decodeURIComponent(req.query.filename);
       }
     } catch (_) {}
+
+    const isPdf = (req.file.mimetype === 'application/pdf' || (rawName || '').toLowerCase().endsWith('.pdf'));
+
+    if (!isPdf && buffer.length > LIMITS.FILE_SIZE_TXT) {
+      unlinkSync(req.file.path);
+      return res.status(400).json({ error: `txt 文件不能超过 ${LIMITS.FILE_SIZE_TXT / 1024 / 1024}MB` });
+    }
+
+    if (isPdf) {
+      // PDF 上传
+      const currentSize = getTotalStorageSize();
+      if (currentSize + buffer.length > LIMITS.TOTAL_STORAGE) {
+        unlinkSync(req.file.path);
+        return res.status(400).json({ error: `存储空间已满（最多 ${LIMITS.TOTAL_STORAGE / 1024 / 1024}MB）` });
+      }
+      let numPages = 1;
+      try {
+        const data = await pdfParse(buffer);
+        numPages = data.numpages || 1;
+      } catch (_) {}
+      const name = sanitizeFilename(rawName, '.pdf');
+      const id = uuidv4();
+      const bookDir = join(BOOKS_DIR, id);
+      mkdirSync(bookDir, { recursive: true });
+      const pdfPath = join(bookDir, 'book.pdf');
+      writeFileSync(pdfPath, buffer);
+      unlinkSync(req.file.path);
+      const pagesDir = join(bookDir, 'pages');
+      mkdirSync(pagesDir, { recursive: true });
+      let hasPages = false;
+      try {
+        hasPages = await convertPdfToPages(pdfPath, pagesDir);
+      } catch (e) {
+        console.warn('[PDF] 预切割失败，请安装: brew install graphicsmagick ghostscript 或 brew install imagemagick ghostscript');
+        console.warn('[PDF] 错误详情:', e.message);
+      }
+      const meta = { id, name, totalPages: numPages, bookType: 'pdf', highlights: [], pdfPages: hasPages };
+      writeFileSync(join(BOOKS_DIR, `${id}.json`), JSON.stringify(meta, null, 0), 'utf-8');
+      books.set(id, meta);
+      return res.json({ id, name, totalPages: numPages, pdfPages: hasPages });
+    }
+
+    // txt 上传
+    const content = decodeText(buffer);
+    unlinkSync(req.file.path);
+
+    if (content.length > LIMITS.MAX_CONTENT_LENGTH) {
+      return res.status(400).json({ error: `文件内容不能超过 ${LIMITS.MAX_CONTENT_LENGTH / 1024 / 1024}MB` });
+    }
+
     const name = sanitizeFilename(rawName);
 
-    // 存储空间限制（当前占用 + 新文件原始大小）
     const currentSize = getTotalStorageSize();
     if (currentSize + buffer.length > LIMITS.TOTAL_STORAGE) {
       return res.status(400).json({ error: `存储空间已满（最多 ${LIMITS.TOTAL_STORAGE / 1024 / 1024}MB）` });
@@ -331,7 +443,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     res.json({ id, name, totalPages: pages.length });
   } catch (e) {
     if (req.file?.path && existsSync(req.file.path)) unlinkSync(req.file.path);
-    const msg = e.code === 'LIMIT_FILE_SIZE' ? `单文件不能超过 ${LIMITS.FILE_SIZE / 1024 / 1024}MB` : e.message;
+    const msg = e.code === 'LIMIT_FILE_SIZE' ? `文件不能超过 ${LIMITS.FILE_SIZE_PDF / 1024 / 1024}MB` : e.message;
     res.status(e.code === 'LIMIT_FILE_SIZE' ? 400 : 500).json({ error: msg });
   }
 });
@@ -342,8 +454,31 @@ app.get('/api/books', (req, res) => {
     id: b.id,
     name: b.name,
     totalPages: b.totalPages,
+    bookType: b.bookType || 'txt',
   }));
   res.json(list);
+});
+
+// 获取 PDF 文件（仅 bookType=pdf）
+app.get('/api/books/:id/file', (req, res) => {
+  const book = books.get(req.params.id);
+  if (!book || book.bookType !== 'pdf') return res.status(404).json({ error: '不存在' });
+  const pdfPath = join(BOOKS_DIR, book.id, 'book.pdf');
+  if (!existsSync(pdfPath)) return res.status(404).json({ error: '文件不存在' });
+  res.sendFile(pdfPath);
+});
+
+// 获取 PDF 预切割页图片（1-based 页码，有则返回图片，无则 404）
+app.get('/api/books/:id/page/:page', (req, res) => {
+  const book = books.get(req.params.id);
+  if (!book || book.bookType !== 'pdf') return res.status(404).json({ error: '不存在' });
+  const pageNum = parseInt(req.params.page, 10);
+  if (!Number.isInteger(pageNum) || pageNum < 1 || pageNum > (book.totalPages || 1)) {
+    return res.status(404).json({ error: '页码无效' });
+  }
+  const imgPath = join(BOOKS_DIR, book.id, 'pages', `${pageNum - 1}.png`);
+  if (!existsSync(imgPath)) return res.status(404).json({ error: '该页未预渲染' });
+  res.type('image/png').sendFile(imgPath);
 });
 
 // 删除书籍（不存在也返回成功；会同时移除引用该书的房间）
@@ -410,7 +545,7 @@ app.get('/api/rooms/:roomId', (req, res) => {
   res.json({
     roomId: room.id,
     currentPage: room.currentPage,
-    book: { id: book.id, name: book.name, totalPages: book.totalPages },
+    book: { id: book.id, name: book.name, totalPages: book.totalPages, bookType: book.bookType || 'txt' },
     readerStates: room.readerStates,
   });
 });
@@ -435,23 +570,33 @@ app.get('/api/rooms/:roomId/page', (req, res) => {
   const pageIndex = !isNaN(pageParam) && pageParam >= 1 && pageParam <= book.totalPages
     ? pageParam - 1
     : room.currentPage - 1;
-  const content = getPageContent(book.id, pageIndex);
+  const isPdf = book.bookType === 'pdf';
+  const content = isPdf ? '' : getPageContent(book.id, pageIndex);
   const highlights = (book.highlights || []).filter((h) => h.pageIndex === pageIndex);
-  res.json({
+  const base = {
     content,
     highlights,
     currentPage: pageIndex + 1,
     totalPages: book.totalPages,
     readerStates: room.readerStates,
-  });
+  };
+  if (isPdf) {
+    base.type = 'pdf';
+    base.pdfUrl = `/api/books/${book.id}/file`;
+    base.pdfPages = !!book.pdfPages;
+    base.pageImageUrl = book.pdfPages ? `/api/books/${book.id}/page/${pageIndex + 1}` : null;
+    base.pageIndex = pageIndex;
+  }
+  res.json(base);
 });
 
-// 添加划线（好词/好句）- 同时写入书籍（阅读展示）和独立存储（书删了也不丢）
+// 添加划线（好词/好句）- 仅 txt 支持，PDF 不支持
 app.post('/api/rooms/:roomId/highlights', (req, res) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return res.status(404).json({ error: '房间不存在' });
   const book = books.get(room.bookId);
   if (!book) return res.status(404).json({ error: '书籍不存在' });
+  if (book.bookType === 'pdf') return res.status(400).json({ error: 'PDF 暂不支持划线' });
   const { type, pageIndex, start, end } = req.body || {};
   if (!['word', 'sentence'].includes(type) || typeof pageIndex !== 'number' || typeof start !== 'number' || typeof end !== 'number') {
     return res.status(400).json({ error: '参数错误' });
@@ -587,7 +732,7 @@ io.on('connection', (socket) => {
 // 统一错误处理（如 multer 文件过大）
 app.use((err, req, res, next) => {
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ error: `单文件不能超过 ${LIMITS.FILE_SIZE / 1024 / 1024}MB` });
+    return res.status(400).json({ error: `文件不能超过 ${LIMITS.FILE_SIZE_PDF / 1024 / 1024}MB` });
   }
   next(err);
 });

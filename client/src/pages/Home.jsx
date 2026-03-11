@@ -71,8 +71,8 @@ export default function Home() {
     async (e) => {
       e.preventDefault()
       const file = e.dataTransfer.files?.[0]
-      if (!file?.name.endsWith('.txt')) {
-        setUploadError('只支持 txt 文件')
+      if (!file?.name.toLowerCase().endsWith('.txt') && !file?.name.toLowerCase().endsWith('.pdf')) {
+        setUploadError('只支持 txt、pdf 文件')
         return
       }
       const input = document.createElement('input')
@@ -153,11 +153,11 @@ export default function Home() {
           <input
             id="file-input"
             type="file"
-            accept=".txt"
+            accept=".txt,.pdf"
             onChange={handleFileChange}
             style={{ display: 'none' }}
           />
-          {loading ? '上传中...' : '点击或拖拽 txt 文件到此处'}
+          {loading ? '上传中...' : '点击或拖拽 txt、pdf 文件到此处'}
         </div>
         {uploadError && <p className="error">{uploadError}</p>}
       </section>

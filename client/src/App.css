@@ -239,6 +239,21 @@
   -webkit-touch-callout: none; /* 不触发系统复制/分享菜单，用自定义划线弹框 */
   -webkit-tap-highlight-color: transparent;
 }
+.content-area .pdf-viewer {
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0;
+}
+.content-area .pdf-viewer canvas,
+.content-area .pdf-viewer img {
+  max-width: 100%;
+  height: auto;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+}
+.content-area .pdf-loading {
+  padding: 2rem;
+  color: #6b5d52;
+}
 .content-area .highlight-word {
   background: linear-gradient(transparent 60%, #fef08a 60%);
   padding: 0 1px;
