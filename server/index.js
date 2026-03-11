@@ -24,7 +24,7 @@ const BOOKS_DIR = join(DATA_DIR, 'books');
 const LIMITS = {
   FILE_SIZE_TXT: 5 * 1024 * 1024,   // txt 单文件最大 5MB
   FILE_SIZE_PDF: 50 * 1024 * 1024,  // pdf 单文件最大 50MB
-  TOTAL_STORAGE: 100 * 1024 * 1024, // 总存储最大 100MB
+  TOTAL_STORAGE: 10 * 1024 * 1024 * 1024, // 总存储最大 10GB
   MAX_BOOKS: 50,                    // 最多 50 本书
   MAX_ROOMS: 100,                   // 最多 100 个房间
   MAX_HIGHLIGHTS: 10000,             // 最多 10000 条好词好句
@@ -321,8 +321,8 @@ function getGmPaths() {
 }
 
 // PDF 预切割为图片页（需安装 graphicsmagick+ghostscript 或 imagemagick+ghostscript）
-async function convertPdfToPages(pdfPath, pagesDir) {
-  console.log('[PDF] 开始预切割:', pdfPath);
+async function convertPdfToPages(pdfPath, pagesDir, numPages = 0) {
+  console.log('[PDF] 开始预切割:', pdfPath, '预计', numPages, '页');
   const opts = {
     density: 150,
     format: 'png',
@@ -331,6 +331,8 @@ async function convertPdfToPages(pdfPath, pagesDir) {
     savePath: pagesDir,
     saveFilename: 'page',
   };
+  const BATCH = 10;
+  const total = numPages || 0;
   const tries = [
     ...getGmPaths().map((p) => () => { const c = fromPath(pdfPath, opts); c.setGMClass(p); return c; }),
     () => { const c = fromPath(pdfPath, opts); c.setGMClass(true); return c; },
@@ -340,7 +342,19 @@ async function convertPdfToPages(pdfPath, pagesDir) {
   for (const fn of tries) {
     try {
       const convert = fn();
-      await convert.bulk(-1, { responseType: 'image' });
+      if (total > 0) {
+        for (let start = 1; start <= total; start += BATCH) {
+          const pages = [];
+          for (let p = start; p < Math.min(start + BATCH, total + 1); p++) pages.push(p);
+          await convert.bulk(pages, { responseType: 'image' });
+          const done = Math.min(start + BATCH - 1, total);
+          console.log('[PDF] 切割进度:', done, '/', total);
+          if (done >= total) break;
+        }
+      } else {
+        await convert.bulk(-1, { responseType: 'image' });
+        console.log('[PDF] 切割完成（全部转换）');
+      }
       lastErr = null;
       break;
     } catch (e) {
@@ -365,19 +379,20 @@ async function convertPdfToPages(pdfPath, pagesDir) {
       } catch (_) {}
     }
   }
-  // 裁剪每页白边（trim 移除四边与角点同色的区域）
-  console.log('[PDF] 开始裁剪白边，共', files.length, '页');
+  // 裁剪每页白边后预留边距（trim 去白边，border 加回适量留白）
+  const PAD = 20; // 四边各预留 20px
+  console.log('[PDF] 开始裁剪白边并预留边距，共', files.length, '页');
   for (let i = 0; i < files.length; i++) {
     const p = join(pagesDir, `${i}.png`);
     try {
       await new Promise((resolve, reject) => {
-        gm(p).trim().write(p, (err) => (err ? reject(err) : resolve()));
+        gm(p).trim().borderColor('white').border(PAD, PAD).write(p, (err) => (err ? reject(err) : resolve()));
       });
-      if ((i + 1) % 20 === 0 || i === files.length - 1) {
+      if ((i + 1) % 10 === 0 || i === files.length - 1) {
         console.log('[PDF] trim 进度:', i + 1, '/', files.length);
       }
     } catch (e) {
-      console.warn('[PDF] trim 白边失败:', p, e.message);
+      console.warn('[PDF] trim/留白失败:', p, e.message);
     }
   }
   console.log('[PDF] 预切割完成，共', files.length, '页');
@@ -423,7 +438,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       const currentSize = getTotalStorageSize();
       if (currentSize + buffer.length > LIMITS.TOTAL_STORAGE) {
         unlinkSync(req.file.path);
-        return res.status(400).json({ error: `存储空间已满（最多 ${LIMITS.TOTAL_STORAGE / 1024 / 1024}MB）` });
+        return res.status(400).json({ error: `存储空间已满（最多 ${LIMITS.TOTAL_STORAGE / 1024 / 1024 / 1024}GB）` });
       }
       let numPages = 1;
       try {
@@ -442,7 +457,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       let hasPages = false;
       try {
         console.log('[PDF] 上传完成，开始预切割 bookId=', id, '页数=', numPages);
-        hasPages = await convertPdfToPages(pdfPath, pagesDir);
+        hasPages = await convertPdfToPages(pdfPath, pagesDir, numPages);
       } catch (e) {
         console.warn('[PDF] 预切割失败，请安装: brew install graphicsmagick ghostscript 或 brew install imagemagick ghostscript');
         console.warn('[PDF] 错误详情:', e.message);
@@ -465,7 +480,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     const currentSize = getTotalStorageSize();
     if (currentSize + buffer.length > LIMITS.TOTAL_STORAGE) {
-      return res.status(400).json({ error: `存储空间已满（最多 ${LIMITS.TOTAL_STORAGE / 1024 / 1024}MB）` });
+      return res.status(400).json({ error: `存储空间已满（最多 ${LIMITS.TOTAL_STORAGE / 1024 / 1024 / 1024}GB）` });
     }
 
     const id = uuidv4();
