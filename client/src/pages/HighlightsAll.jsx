@@ -11,7 +11,7 @@ function formatDate(ts) {
 }
 
 async function toggleUsed(id) {
-  const res = await fetch(`/api/highlights/${id}/used`, { method: 'PATCH' })
+  const res = await fetch(`/api/highlights/${id}/used`, { method: 'PATCH', credentials: 'include' })
   return res.ok ? (await res.json()).used : null
 }
 
@@ -26,7 +26,7 @@ export default function HighlightsAll() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/highlights')
+      const res = await fetch('/api/highlights', { credentials: 'include' })
       if (!res.ok) throw new Error('获取失败')
       const data = await safeJson(res)
       setWords(data.words || [])

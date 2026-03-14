@@ -11,7 +11,7 @@ function formatDate(ts) {
 }
 
 async function toggleUsed(id) {
-  const res = await fetch(`/api/highlights/${id}/used`, { method: 'PATCH' })
+  const res = await fetch(`/api/highlights/${id}/used`, { method: 'PATCH', credentials: 'include' })
   return res.ok ? (await res.json()).used : null
 }
 
@@ -29,8 +29,8 @@ export default function Highlights() {
   const fetchData = useCallback(async () => {
     try {
       const [roomRes, highlightsRes] = await Promise.all([
-        fetch(`/api/rooms/${roomId}`),
-        fetch(`/api/rooms/${roomId}/highlights-all`),
+        fetch(`/api/rooms/${roomId}`, { credentials: 'include' }),
+        fetch(`/api/rooms/${roomId}/highlights-all`, { credentials: 'include' }),
       ])
       if (!roomRes.ok) throw new Error('房间不存在')
       const roomData = await safeJson(roomRes)

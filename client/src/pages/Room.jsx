@@ -6,20 +6,28 @@ import { safeJson } from '../utils/api'
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
 
+const DEFAULT_HIGHLIGHT_COLOR = '#fef08a'
+
 function renderWithHighlights(content, highlights) {
   if (!content) return []
   if (!highlights?.length) return [{ type: 'text', text: content }]
-  const sorted = [...highlights].sort((a, b) => a.start - b.start)
+  const sorted = [...highlights].sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
   const parts = []
   let lastEnd = 0
   for (const h of sorted) {
-    if (h.start > lastEnd) {
-      parts.push({ type: 'text', text: content.slice(lastEnd, h.start) })
+    const start = h.start ?? 0
+    const end = h.end ?? start
+    if (start > lastEnd) {
+      parts.push({ type: 'text', text: content.slice(lastEnd, start) })
     }
-    if (h.end > h.start) {
-      parts.push({ type: h.type, text: content.slice(h.start, h.end) })
+    if (end > start) {
+      parts.push({
+        type: h.type,
+        text: content.slice(start, end),
+        color: h.color || DEFAULT_HIGHLIGHT_COLOR,
+      })
     }
-    lastEnd = Math.max(lastEnd, h.end)
+    lastEnd = Math.max(lastEnd, end)
   }
   if (lastEnd < content.length) {
     parts.push({ type: 'text', text: content.slice(lastEnd) })
@@ -52,11 +60,12 @@ export default function Room() {
   const [readyCooldownRemaining, setReadyCooldownRemaining] = useState(0)
   const [socket, setSocket] = useState(null)
   const [error, setError] = useState('')
+  const [highlightError, setHighlightError] = useState('')
   const [loading, setLoading] = useState(true)
 
   const fetchPage = useCallback(async () => {
     try {
-      const res = await fetch(`/api/rooms/${roomId}/page`)
+      const res = await fetch(`/api/rooms/${roomId}/page`, { credentials: 'include' })
       if (!res.ok) throw new Error('获取失败')
       const data = await safeJson(res)
       setContent(data.content || '')
@@ -76,7 +85,7 @@ export default function Room() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`/api/rooms/${roomId}`)
+        const res = await fetch(`/api/rooms/${roomId}`, { credentials: 'include' })
         if (!res.ok) throw new Error('房间不存在')
         const data = await safeJson(res)
         setBook(data.book)
@@ -108,6 +117,7 @@ export default function Room() {
   }, [])
 
   const checkSelection = useCallback(() => {
+    setHighlightError('')
     const sel = window.getSelection()
     const text = sel?.toString()?.trim()
     const container = isPdf && pdfHighlightMode ? pdfContentRef.current : (contentTextRef.current || contentRef.current)
@@ -245,7 +255,7 @@ export default function Room() {
 
   useEffect(() => {
     if (currentPage && totalPages) {
-      fetch(`/api/rooms/${roomId}/page?page=${currentPage}`)
+      fetch(`/api/rooms/${roomId}/page?page=${currentPage}`, { credentials: 'include' })
         .then((r) => safeJson(r))
         .then((d) => {
           setContent(d?.content ?? '')
@@ -262,7 +272,7 @@ export default function Room() {
   const releaseRoom = async () => {
     if (!confirm('确定释放房间？释放后房间将永久删除，其他人将无法继续阅读。')) return
     try {
-      await fetch(`/api/rooms/${roomId}/release`, { method: 'POST' })
+      await fetch(`/api/rooms/${roomId}/release`, { method: 'POST', credentials: 'include' })
       navigate('/')
     } catch (_) {
       navigate('/')
@@ -281,19 +291,25 @@ export default function Room() {
     if (!selectionPopover) return
     const { text, start, end } = selectionPopover
     setSelectionPopover(null)
+    setHighlightError('')
     window.getSelection()?.removeAllRanges()
     try {
       const body = isPdf ? { type, pageIndex: currentPage - 1, text } : { type, pageIndex: currentPage - 1, start, end }
       const res = await fetch(`/api/rooms/${roomId}/highlights`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       })
+      const data = await safeJson(res)
       if (res.ok) {
-        const data = await safeJson(res)
         setHighlights(data.highlights || [])
+      } else {
+        setHighlightError(data.error || '划线失败')
       }
-    } catch (_) {}
+    } catch (_) {
+      setHighlightError('划线失败')
+    }
   }
 
   const handleReady = () => {
@@ -423,6 +439,9 @@ export default function Room() {
                   <mark
                     key={i}
                     className={p.type === 'word' ? 'highlight-word' : 'highlight-sentence'}
+                    style={{
+                      background: `linear-gradient(transparent 60%, ${p.color || '#fef08a'} 60%)`,
+                    }}
                   >
                     {p.text}
                   </mark>
@@ -431,6 +450,11 @@ export default function Room() {
             ) : (
               '（本页无内容）'
             )}
+          </div>
+        )}
+        {highlightError && (
+          <div className="highlight-error" role="alert">
+            {highlightError}
           </div>
         )}
         {selectionPopover && (

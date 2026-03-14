@@ -1,9 +1,13 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { safeJson } from '../utils/api'
+
+const fetchOpts = { credentials: 'include' }
 
 export default function Home() {
   const navigate = useNavigate()
+  const { user, logout } = useAuth()
   const [books, setBooks] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedBook, setSelectedBook] = useState('')
@@ -13,7 +17,7 @@ export default function Home() {
 
   const fetchBooks = useCallback(async () => {
     try {
-      const res = await fetch('/api/books')
+      const res = await fetch('/api/books', fetchOpts)
       const data = await safeJson(res)
       setBooks(Array.isArray(data) ? data : [])
     } catch (_) {
@@ -23,7 +27,7 @@ export default function Home() {
 
   const fetchRooms = useCallback(async () => {
     try {
-      const res = await fetch('/api/rooms')
+      const res = await fetch('/api/rooms', fetchOpts)
       const data = await safeJson(res)
       setRooms(Array.isArray(data) ? data : [])
     } catch (_) {
@@ -37,7 +41,7 @@ export default function Home() {
   }, [fetchBooks, fetchRooms])
 
   useEffect(() => {
-    fetch('/api/health')
+    fetch('/api/health', fetchOpts)
       .then((r) => r.ok && setBackendOk(true))
       .catch(() => setBackendOk(false))
   }, [])
@@ -52,6 +56,7 @@ export default function Home() {
       formData.append('file', file)
       const res = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
         method: 'POST',
+        credentials: 'include',
         body: formData,
       })
       const data = await safeJson(res)
@@ -96,6 +101,7 @@ export default function Home() {
       const res = await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ bookId: selectedBook }),
       })
       const data = await safeJson(res)
@@ -117,6 +123,7 @@ export default function Home() {
       const res = await fetch('/api/books/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ id: bookId }),
       })
       const data = await safeJson(res)
@@ -134,33 +141,42 @@ export default function Home() {
       <header>
         <h1>📖 两人共读</h1>
         <p>上传书籍，创建房间，邀请好友一起阅读</p>
-        <button className="highlights-link" onClick={() => navigate('/highlights')}>
-          好词好句
-        </button>
+        <div className="header-actions">
+          <button className="highlights-link" onClick={() => navigate('/highlights')}>
+            好词好句
+          </button>
+          <span className="user-info">
+            {user?.username}
+            {user?.isAdmin && <span className="admin-badge">管理员</span>}
+          </span>
+          <button className="logout-btn" onClick={logout}>退出</button>
+        </div>
         {backendOk === false && (
           <p className="backend-warn">⚠️ 后端未连接，请确保已运行 npm run dev（或分别启动 server 和 client）</p>
         )}
       </header>
 
-      <section className="upload-section">
-        <h2>上传书籍</h2>
-        <div
-          className="dropzone"
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onClick={() => document.getElementById('file-input').click()}
-        >
-          <input
-            id="file-input"
-            type="file"
-            accept=".txt,.pdf"
-            onChange={handleFileChange}
-            style={{ display: 'none' }}
-          />
-          {loading ? '上传中...' : '点击或拖拽 txt、pdf 文件到此处'}
-        </div>
-        {uploadError && <p className="error">{uploadError}</p>}
-      </section>
+      {user?.isAdmin && (
+        <section className="upload-section">
+          <h2>上传书籍</h2>
+          <div
+            className="dropzone"
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onClick={() => document.getElementById('file-input').click()}
+          >
+            <input
+              id="file-input"
+              type="file"
+              accept=".txt,.pdf"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
+            {loading ? '上传中...' : '点击或拖拽 txt、pdf 文件到此处'}
+          </div>
+          {uploadError && <p className="error">{uploadError}</p>}
+        </section>
+      )}
 
       <section className="books-section">
         <h2>已上传书籍</h2>

@@ -2,8 +2,11 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import session from 'express-session';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
+import { initAdminUser, loginUser, registerUser, HIGHLIGHT_COLORS } from './auth.js';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import iconv from 'iconv-lite';
 import { tmpdir, networkInterfaces } from 'os';
@@ -42,7 +45,16 @@ const io = new Server(httpServer, {
   cors: { origin: true },
 });
 
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser());
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'read-book-secret-change-in-prod',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 },
+  })
+);
 app.use(express.json({ limit: LIMITS.JSON_BODY_LIMIT }));
 
 // 请求日志：每次请求记录详情
@@ -67,6 +79,60 @@ app.use((req, res, next) => {
 
 // 健康检查（用于确认后端已启动）
 app.get('/api/health', (_, res) => res.json({ ok: true }));
+
+// 获取当前用户（未登录返回 null）
+app.get('/api/me', (req, res) => {
+  if (req.session?.user) {
+    return res.json(req.session.user);
+  }
+  res.json(null);
+});
+
+// 获取划线颜色选项
+app.get('/api/highlight-colors', (_, res) => res.json(HIGHLIGHT_COLORS));
+
+// 登录
+app.post('/api/login', async (req, res) => {
+  const { username, password, highlightColor } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: '请输入用户名和密码' });
+  }
+  const result = await loginUser(username, password, highlightColor);
+  if (!result.ok) return res.status(401).json({ error: result.error });
+  req.session.user = result.user;
+  res.json(result.user);
+});
+
+// 注册
+app.post('/api/register', async (req, res) => {
+  const { username, password, highlightColor } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: '请输入用户名和密码' });
+  }
+  const result = await registerUser(username, password, highlightColor);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  req.session.user = result.user;
+  res.json(result.user);
+});
+
+// 登出
+app.post('/api/logout', (req, res) => {
+  req.session.destroy(() => {});
+  res.json({ ok: true });
+});
+
+// 需要登录的中间件
+function requireAuth(req, res, next) {
+  if (!req.session?.user) return res.status(401).json({ error: '请先登录' });
+  next();
+}
+
+// 需要管理员权限的中间件
+function requireAdmin(req, res, next) {
+  if (!req.session?.user) return res.status(401).json({ error: '请先登录' });
+  if (!req.session.user.isAdmin) return res.status(403).json({ error: '仅管理员可上传文件' });
+  next();
+}
 
 // 分享链接基础 URL（用于复制链接，解决 localhost 时跨设备分享）
 app.get('/api/share-base', (req, res) => {
@@ -407,8 +473,8 @@ function decodeText(buffer) {
   return str;
 }
 
-// 上传 txt/pdf 文件（带安全校验）
-app.post('/api/upload', upload.single('file'), async (req, res) => {
+// 上传 txt/pdf 文件（带安全校验，仅管理员）
+app.post('/api/upload', requireAdmin, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: '请选择文件' });
 
@@ -536,8 +602,8 @@ app.get('/api/books/:id/page/:page', (req, res) => {
   res.type('image/png').sendFile(imgPath);
 });
 
-// 删除书籍（不存在也返回成功；会同时移除引用该书的房间）
-app.post('/api/books/delete', (req, res) => {
+// 删除书籍（仅管理员，不存在也返回成功；会同时移除引用该书的房间）
+app.post('/api/books/delete', requireAdmin, (req, res) => {
   const { id } = req.body || {};
   if (id && books.has(id)) {
     books.delete(id);
@@ -569,8 +635,8 @@ app.get('/api/rooms', (req, res) => {
   res.json(list);
 });
 
-// 创建房间
-app.post('/api/rooms', (req, res) => {
+// 创建房间（需登录）
+app.post('/api/rooms', requireAuth, (req, res) => {
   const { bookId } = req.body;
   if (!bookId || !books.has(bookId)) {
     return res.status(400).json({ error: '书籍不存在' });
@@ -645,8 +711,8 @@ app.get('/api/rooms/:roomId/page', (req, res) => {
   res.json(base);
 });
 
-// 添加划线（好词/好句）- txt 用 start/end，PDF 用 text
-app.post('/api/rooms/:roomId/highlights', (req, res) => {
+// 添加划线（好词/好句）- txt 用 start/end，PDF 用 text，需登录
+app.post('/api/rooms/:roomId/highlights', requireAuth, (req, res) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return res.status(404).json({ error: '房间不存在' });
   const book = books.get(room.bookId);
@@ -672,11 +738,27 @@ app.post('/api/rooms/:roomId/highlights', (req, res) => {
     startVal = start;
     endVal = end;
   }
+  // 同一文字只能被划线一次：检查是否重叠
+  const pageHighlights = (book.highlights || []).filter((h) => h.pageIndex === pageIndex);
+  if (book.bookType === 'pdf') {
+    const exists = pageHighlights.some((h) => h.text && h.text === text);
+    if (exists) return res.status(400).json({ error: '该文字已被划线，不能重复划线' });
+  } else {
+    const overlaps = pageHighlights.some((h) => {
+      const a = h.start;
+      const b = h.end;
+      return !(endVal <= a || startVal >= b);
+    });
+    if (overlaps) return res.status(400).json({ error: '该文字已被划线，不能重复划线' });
+  }
   if (highlightsStore.length >= LIMITS.MAX_HIGHLIGHTS) {
     return res.status(400).json({ error: `好词好句数量已达上限（${LIMITS.MAX_HIGHLIGHTS}）` });
   }
+  const userColor = req.session.user?.highlightColor || HIGHLIGHT_COLORS[0].value;
   if (!book.highlights) book.highlights = [];
-  const hl = book.bookType === 'pdf' ? { type, pageIndex, text } : { type, pageIndex, start: startVal, end: endVal };
+  const hl = book.bookType === 'pdf'
+    ? { type, pageIndex, text, color: userColor }
+    : { type, pageIndex, start: startVal, end: endVal, color: userColor };
   book.highlights.push(hl);
   saveBook(book);
   // 独立存储：书删了也不删（PDF 用 start=0, end=text.length 兼容）
@@ -689,6 +771,7 @@ app.post('/api/rooms/:roomId/highlights', (req, res) => {
     end: endVal,
     type,
     text,
+    color: userColor,
     createdAt: Date.now(),
     used: false,
   });
@@ -825,6 +908,7 @@ const PORT = 3101;
 
 // 启动时加载持久化数据
 ensureDataDir();
+initAdminUser();
 loadBooks();
 loadHighlights();
 migrateHighlightsFromBooks();
