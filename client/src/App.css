@@ -551,6 +551,19 @@
 .highlights-list li .used-toggle:hover {
   background: #e8e0d5;
 }
+.highlights-list li .delete-highlight-btn {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.9em;
+  color: #c44;
+  background: transparent;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.highlights-list li .delete-highlight-btn:hover {
+  background: #fecaca;
+  color: #991b1b;
+}
 .highlights-list li .book-name {
   flex: 0 0 auto;
   font-size: 0.85em;

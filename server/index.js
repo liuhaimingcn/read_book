@@ -802,6 +802,36 @@ app.patch('/api/highlights/:id/used', (req, res) => {
   res.json({ ok: true, used: item.used });
 });
 
+// 删除好词好句（已标记为使用的可删除）
+app.delete('/api/highlights/:id', (req, res) => {
+  const item = highlightsStore.find((h) => h.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '不存在' });
+  const idx = highlightsStore.findIndex((h) => h.id === req.params.id);
+  highlightsStore.splice(idx, 1);
+  saveHighlights();
+  // 同步从书籍中移除
+  const book = books.get(item.bookId);
+  if (book?.highlights) {
+    const match = (h) => {
+      if (h.pageIndex !== item.pageIndex || h.type !== item.type) return false;
+      if (book.bookType === 'pdf') return h.text === item.text;
+      return h.start === item.start && h.end === item.end;
+    };
+    book.highlights = book.highlights.filter((h) => !match(h));
+    saveBook(book);
+    // 通知相关房间
+    for (const [roomId, room] of rooms) {
+      if (room.bookId === item.bookId) {
+        io.to(roomId).emit('highlights-updated', {
+          pageIndex: item.pageIndex,
+          highlights: book.highlights.filter((h) => h.pageIndex === item.pageIndex),
+        });
+      }
+    }
+  }
+  res.json({ ok: true });
+});
+
 // 获取全部好词好句（独立于书籍，书删了也能看到）
 app.get('/api/highlights', (req, res) => {
   const bookIdToRoom = new Map();

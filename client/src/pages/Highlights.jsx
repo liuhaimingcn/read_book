@@ -15,6 +15,12 @@ async function toggleUsed(id) {
   return res.ok ? (await res.json()).used : null
 }
 
+async function deleteHighlight(id) {
+  const res = await fetch(`/api/highlights/${id}`, { method: 'DELETE', credentials: 'include' })
+  return res.ok
+}
+
+
 export default function Highlights() {
   const { roomId } = useParams()
   const navigate = useNavigate()
@@ -25,6 +31,7 @@ export default function Highlights() {
   const [sentencesPage, setSentencesPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [deleteError, setDeleteError] = useState('')
 
   const fetchData = useCallback(async () => {
     try {
@@ -73,6 +80,18 @@ export default function Highlights() {
     }
   }
 
+  const handleDelete = async (id) => {
+    if (!confirm('确定删除这条好词好句？')) return
+    setDeleteError('')
+    const ok = await deleteHighlight(id)
+    if (ok) {
+      setWords((prev) => prev.filter((h) => h.id !== id))
+      setSentences((prev) => prev.filter((h) => h.id !== id))
+    } else {
+      setDeleteError('删除失败，请刷新后重试')
+    }
+  }
+
   if (loading) return <div className="highlights-page loading">加载中...</div>
   if (error) {
     return (
@@ -91,6 +110,7 @@ export default function Highlights() {
         </button>
         <h1>{book?.name}</h1>
         <p className="subtitle">好词好句管理</p>
+        {deleteError && <p className="login-error">{deleteError}</p>}
       </header>
 
       <main className="highlights-main">
@@ -109,6 +129,11 @@ export default function Highlights() {
                       {h.id && (
                         <button type="button" className="used-toggle" onClick={() => handleToggleUsed(h.id)}>
                           {h.used ? '标为未使用' : '标为已使用'}
+                        </button>
+                      )}
+                      {h.id && (
+                        <button type="button" className="delete-highlight-btn" onClick={() => handleDelete(h.id)}>
+                          删除
                         </button>
                       )}
                     </div>
@@ -157,6 +182,11 @@ export default function Highlights() {
                       {h.id && (
                         <button type="button" className="used-toggle" onClick={() => handleToggleUsed(h.id)}>
                           {h.used ? '标为未使用' : '标为已使用'}
+                        </button>
+                      )}
+                      {h.id && (
+                        <button type="button" className="delete-highlight-btn" onClick={() => handleDelete(h.id)}>
+                          删除
                         </button>
                       )}
                     </div>
